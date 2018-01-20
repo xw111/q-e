@@ -19,6 +19,7 @@ SUBROUTINE vloc_psi_gamma(lda, n, m, psi, v, hpsi)
   USE fft_interfaces,ONLY : fwfft, invfft
   USE wavefunctions_module,  ONLY: psic
   USE fft_helper_subroutines
+  USE fft_types,     ONLY : fft_scratch_allocate, fft_scratch_deallocate
   !
   IMPLICIT NONE
   !
@@ -37,6 +38,9 @@ SUBROUTINE vloc_psi_gamma(lda, n, m, psi, v, hpsi)
   INTEGER :: v_siz, idx, ioff
   !
   CALL start_clock ('vloc_psi')
+  !
+  CALL fft_scratch_allocate( dffts )
+  !
   incr = 2
   !
   use_tg = dffts%has_task_groups 
@@ -190,6 +194,9 @@ SUBROUTINE vloc_psi_gamma(lda, n, m, psi, v, hpsi)
      DEALLOCATE( tg_v )
      !
   ENDIF
+  !
+  CALL fft_scratch_deallocate( dffts )
+  !
   CALL stop_clock ('vloc_psi')
   !
   RETURN
@@ -215,6 +222,7 @@ SUBROUTINE vloc_psi_k(lda, n, m, psi, v, hpsi)
   USE fft_interfaces,ONLY : fwfft, invfft
   USE fft_helper_subroutines
   USE wavefunctions_module,  ONLY: psic
+  USE fft_types,     ONLY : fft_scratch_allocate, fft_scratch_deallocate
   !
   IMPLICIT NONE
   !
@@ -233,6 +241,9 @@ SUBROUTINE vloc_psi_k(lda, n, m, psi, v, hpsi)
   INTEGER :: v_siz, idx, ioff
   !
   CALL start_clock ('vloc_psi')
+  !
+  CALL fft_scratch_allocate( dffts )
+  !
   use_tg = dffts%has_task_groups 
   !
   IF( use_tg ) THEN
@@ -355,6 +366,9 @@ SUBROUTINE vloc_psi_k(lda, n, m, psi, v, hpsi)
      DEALLOCATE( tg_v )
      !
   ENDIF
+  !
+  CALL fft_scratch_deallocate( dffts )
+  !
   CALL stop_clock ('vloc_psi')
   !
 99 format ( 20 ('(',2f12.9,')') )
@@ -380,6 +394,7 @@ SUBROUTINE vloc_psi_nc (lda, n, m, psi, v, hpsi)
   USE noncollin_module,     ONLY: npol
   USE wavefunctions_module, ONLY: psic_nc
   USE fft_helper_subroutines
+  USE fft_types,     ONLY : fft_scratch_allocate, fft_scratch_deallocate
   !
   IMPLICIT NONE
   !
@@ -399,6 +414,8 @@ SUBROUTINE vloc_psi_nc (lda, n, m, psi, v, hpsi)
   INTEGER :: right_nnr, right_nr3, right_inc
   !
   CALL start_clock ('vloc_psi')
+  !
+  CALL fft_scratch_allocate( dffts )
   !
   incr = 1
   !
@@ -550,6 +567,9 @@ SUBROUTINE vloc_psi_nc (lda, n, m, psi, v, hpsi)
      DEALLOCATE( tg_psic )
      !
   ENDIF
+  !
+  CALL fft_scratch_deallocate( dffts )
+  !
   CALL stop_clock ('vloc_psi')
   !
   RETURN

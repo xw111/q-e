@@ -128,6 +128,8 @@ MODULE fft_types
     CHARACTER(len=12):: wave_clock_label = ' '
 
     INTEGER :: grid_id
+    ! scratch space
+    COMPLEX(DP), ALLOCATABLE :: aux (:)
 
   END TYPE
 
@@ -137,6 +139,7 @@ MODULE fft_types
   PUBLIC :: fft_type_descriptor, fft_type_init
   PUBLIC :: fft_type_allocate, fft_type_deallocate
   PUBLIC :: fft_stick_index
+  PUBLIC :: fft_scratch_allocate, fft_scratch_deallocate
 
 CONTAINS
 
@@ -310,6 +313,24 @@ CONTAINS
     desc%grid_id = 0
 
   END SUBROUTINE fft_type_deallocate
+
+!=----------------------------------------------------------------------------=!
+
+  SUBROUTINE fft_scratch_allocate( desc )
+    TYPE (fft_type_descriptor) :: desc
+    IF ( desc%lpara .AND. .NOT. ALLOCATED( desc%aux ) ) THEN
+      IF ( desc%has_task_groups ) THEN
+        ALLOCATE( desc%aux(desc%nnr_tg) )
+      ELSE
+        ALLOCATE( desc%aux(desc%nnr) )
+      ENDIF
+    ENDIF
+  END SUBROUTINE fft_scratch_allocate
+
+  SUBROUTINE fft_scratch_deallocate( desc )
+    TYPE (fft_type_descriptor) :: desc
+    IF ( ALLOCATED( desc%aux ) ) DEALLOCATE( desc%aux )
+  END SUBROUTINE fft_scratch_deallocate
 
 !=----------------------------------------------------------------------------=!
 

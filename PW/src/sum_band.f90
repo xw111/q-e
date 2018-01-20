@@ -42,8 +42,8 @@ SUBROUTINE sum_band()
   USE funct,                ONLY : dft_is_meta
   USE paw_symmetry,         ONLY : PAW_symmetrize
   USE paw_variables,        ONLY : okpaw
-  USE becmod,               ONLY : allocate_bec_type, deallocate_bec_type, &
-                                   becp
+  USE becmod,               ONLY : allocate_bec_type, deallocate_bec_type, becp
+  USE fft_types,            ONLY : fft_scratch_allocate, fft_scratch_deallocate
   !
   IMPLICIT NONE
   !
@@ -248,6 +248,8 @@ SUBROUTINE sum_band()
        !
        ! ... here we sum for each k point the contribution
        ! ... of the wavefunctions to the charge
+       !
+       CALL fft_scratch_allocate( dffts )
        !
        use_tg = ( dffts%has_task_groups ) .AND. ( .NOT. (dft_is_meta() .OR. lxdm) )
        !
@@ -456,6 +458,8 @@ SUBROUTINE sum_band()
           DEALLOCATE( tg_rho )
        END IF
        !
+       CALL fft_scratch_deallocate( dffts )
+       !
        RETURN
        !
      END SUBROUTINE sum_band_gamma
@@ -487,6 +491,8 @@ SUBROUTINE sum_band()
        !
        ! ... here we sum for each k point the contribution
        ! ... of the wavefunctions to the charge
+       !
+       CALL fft_scratch_allocate( dffts )
        !
        use_tg = ( dffts%has_task_groups ) .AND. ( .NOT. (dft_is_meta() .OR. lxdm) )
        !
@@ -750,6 +756,8 @@ SUBROUTINE sum_band()
              DEALLOCATE( tg_rho )
           END IF
        END IF
+       !
+       CALL fft_scratch_deallocate( dffts )
        !
        RETURN
        !

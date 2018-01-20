@@ -61,19 +61,18 @@ SUBROUTINE tg_cft3s( f, dfft, isgn )
   USE fft_scalar, ONLY : cft_1z
   USE scatter_mod,ONLY : fft_scatter_xy, fft_scatter_yz, fft_scatter_tg
   USE scatter_mod,ONLY : fft_scatter_tg_opt
-  USE fft_types,  ONLY : fft_type_descriptor
+  USE fft_types,  ONLY : fft_type_descriptor, fft_scratch_allocate, fft_scratch_deallocate
   !
   IMPLICIT NONE
   !
-  TYPE (fft_type_descriptor), INTENT(in) :: dfft   ! descriptor of fft data layout
-  COMPLEX(DP), INTENT(inout)             :: f( : ) ! array containing data to be transformed
-  INTEGER, INTENT(in)                    :: isgn   ! fft direction (potential: +/-1, wave: +/-2, wave_tg: +/-3)
+  TYPE (fft_type_descriptor) :: dfft   ! descriptor of fft data layout
+  COMPLEX(DP), INTENT(inout) :: f(:)   ! array containing data to be transformed
+  INTEGER, INTENT(in)        :: isgn   ! fft direction (potential: +/-1, wave: +/-2, wave_tg: +/-3)
   !
-  INTEGER                  :: n1, n2, n3, nx1, nx2, nx3
-  INTEGER                  :: nnr_
-  INTEGER                  :: nsticks_x, nsticks_y, nsticks_z
-  COMPLEX(DP), ALLOCATABLE :: aux (:)
-  INTEGER                  :: i
+  INTEGER :: n1, n2, n3, nx1, nx2, nx3
+  INTEGER :: nnr_
+  INTEGER :: nsticks_x, nsticks_y, nsticks_z
+  INTEGER :: i
   !
   !write (6,*) 'enter tg_cft3s ',isgn ; write(6,*) ; FLUSH(6)
   n1  = dfft%nr1  ; n2  = dfft%nr2  ; n3  = dfft%nr3
@@ -97,40 +96,42 @@ SUBROUTINE tg_cft3s( f, dfft, isgn )
   else
      CALL fftx_error__( ' tg_cft3s', ' wrong value of isgn ', 10+abs(isgn) )
   end if
-  ALLOCATE( aux( nnr_ ) ) 
+  !
+  CALL fft_scratch_allocate(dfft)
   !
   IF ( isgn > 0 ) THEN  ! G -> R
      if (isgn==+3) then 
-        call fft_scatter_tg_opt ( dfft, f, aux, nnr_, isgn)
+        call fft_scatter_tg_opt ( dfft, f, dfft%aux, nnr_, isgn)
      else
-        aux(1:nnr_)=f(1:nnr_) ! not limiting the range to dfft%nnr may crash when size(f)>size(aux)
+        dfft%aux(1:nnr_)=f(1:nnr_) ! not limiting the range to dfft%nnr may crash when size(f)>size(aux)
      endif
-     CALL cft_1z( aux, nsticks_z, n3, nx3, isgn, f )
-     CALL fft_scatter_yz ( dfft, f, aux, nnr_, isgn )
-     CALL cft_1z( aux, nsticks_y, n2, nx2, isgn, f )
-     CALL fft_scatter_xy ( dfft, f, aux, nnr_, isgn )
-     CALL cft_1z( aux, nsticks_x, n1, nx1, isgn, f )
+     CALL cft_1z( dfft%aux, nsticks_z, n3, nx3, isgn, f )
+     CALL fft_scatter_yz ( dfft, f, dfft%aux, nnr_, isgn )
+     CALL cft_1z( dfft%aux, nsticks_y, n2, nx2, isgn, f )
+     CALL fft_scatter_xy ( dfft, f, dfft%aux, nnr_, isgn )
+     CALL cft_1z( dfft%aux, nsticks_x, n1, nx1, isgn, f )
      ! clean garbage beyond the intended dimension. should not be needed but apparently it is !
      if (nsticks_x*nx1 < nnr_) f(nsticks_x*nx1+1:nnr_) = (0.0_DP,0.0_DP)
      !
   ELSE                  ! R -> G
      !
-     CALL cft_1z( f, nsticks_x, n1, nx1, isgn, aux )
-     CALL fft_scatter_xy ( dfft, f, aux, nnr_, isgn )
-     CALL cft_1z( f, nsticks_y, n2, nx2, isgn, aux )
-     CALL fft_scatter_yz ( dfft, f, aux, nnr_, isgn )
-     CALL cft_1z( f, nsticks_z, n3, nx3, isgn, aux )
+     CALL cft_1z( f, nsticks_x, n1, nx1, isgn, dfft%aux )
+     CALL fft_scatter_xy ( dfft, f, dfft%aux, nnr_, isgn )
+     CALL cft_1z( f, nsticks_y, n2, nx2, isgn, dfft%aux )
+     CALL fft_scatter_yz ( dfft, f, dfft%aux, nnr_, isgn )
+     CALL cft_1z( f, nsticks_z, n3, nx3, isgn, dfft%aux )
      ! clean garbage beyond the intended dimension. should not be needed but apparently it is !
-     if (nsticks_z*nx3 < nnr_) aux(nsticks_z*nx3+1:nnr_) = (0.0_DP,0.0_DP)
+     if (nsticks_z*nx3 < nnr_) dfft%aux(nsticks_z*nx3+1:nnr_) = (0.0_DP,0.0_DP)
      if (isgn==-3) then 
-        call fft_scatter_tg_opt ( dfft, aux, f, nnr_, isgn)
+        call fft_scatter_tg_opt ( dfft, dfft%aux, f, nnr_, isgn)
      else
-        f(1:nnr_)=aux(1:nnr_) ! not limiting the range to dfft%nnr may crash when size(f)>size(aux)
+        f(1:nnr_)=dfft%aux(1:nnr_) ! not limiting the range to dfft%nnr may crash when size(f)>size(aux)
      endif
   ENDIF
   !write (6,99) f(1:400); write(6,*); FLUSH(6)
-  !
-  DEALLOCATE( aux )
+  if (abs(isgn) == 1 ) then       ! potential fft
+     CALL fft_scratch_deallocate(dfft)
+  endif
   !
   !if (.true.) stop
   RETURN
