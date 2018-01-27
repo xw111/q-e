@@ -62,7 +62,7 @@ all : tldeps average.x bands.x dos.x epsilon.x initial_state.x fs.x \
       plan_avg.x plotband.x plotproj.x plotrho.x pmw.x pp.x projwfc.x \
       pawplot.x sumpdos.x pw2wannier90.x pw_export.x pw2gw.x \
       wannier_ham.x wannier_plot.x molecularpdos.x \
-      pw2bgw.x bgw2pw.x wfck2r.x importexport_binary.x
+      pw2bgw.x bgw2pw.x wfck2r.x importexport_binary.x pw2qmcpack.x
 
 
 libpp.a : $(PPOBJS) 
@@ -203,6 +203,11 @@ bgw2pw.x : bgw2pw.o libpp.a $(MODULES) $(LIBOBJS)
 fs.x : fermisurface.o libpp.a $(MODULES) $(LIBOBJS)
 	$(LD) $(LDFLAGS) -o $@ \
 		fermisurface.o libpp.a $(MODULES) $(LIBOBJS) $(LIBS)
+	- ( cd ../../bin ; ln -fs ../PP/src/$@ . )
+
+pw2qmcpack.x : pw2qmcpack.o libpp.a $(MODULES) $(LIBOBJS)
+	$(LD) $(LDFLAGS) -o $@ \
+		pw2qmcpack.o libpp.a $(MODULES) $(LIBOBJS) $(LIBS)
 	- ( cd ../../bin ; ln -fs ../PP/src/$@ . )
 
 tldeps :

@@ -16,11 +16,17 @@ memstat.o \
 ptrace.o \
 qsort.o
 
+C99_OBJS = \
+esh5_interfaces.o
+
 all : clib.a
 
-clib.a : $(OBJS) 
+clib.a : $(OBJS)  $(C99_OBJS)
 	$(AR) $(ARFLAGS) $@ $?
 	$(RANLIB) $@
+
+esh5_interfaces.o : esh5_interfaces.c
+	$(CC) $(CFLAGS) $(CFLAGS_C99) -c $<
 
 source :
 	co -l $(OBJS:.o=.c)

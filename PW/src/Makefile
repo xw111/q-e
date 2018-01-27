@@ -172,6 +172,7 @@ rdiagh.o \
 rdiaghg.o \
 read_conf_from_file.o \
 read_file.o \
+read_file_lite.o \
 regterg.o \
 remove_atomic_rho.o \
 report_mag.o \
