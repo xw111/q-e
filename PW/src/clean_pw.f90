@@ -5,6 +5,9 @@
 ! in the root directory of the present distribution,
 ! or http://www.gnu.org/copyleft/gpl.txt .
 !
+! TB
+! included deallocation of forcefield of gate 'forcegate'
+!
 !----------------------------------------------------------------------
 SUBROUTINE clean_pw( lflag )
   !----------------------------------------------------------------------
@@ -25,11 +28,11 @@ SUBROUTINE clean_pw( lflag )
                                    eigts1, eigts2, eigts3
   USE gvecs,                ONLY : nls, nlsm
   USE fixed_occ,            ONLY : f_inp
-  USE ktetra,               ONLY : tetra
-  USE klist,                ONLY : ngk
+  USE ktetra,               ONLY : deallocate_tetra
+  USE klist,                ONLY : deallocate_igk
   USE gvect,                ONLY : ig_l2g
   USE vlocal,               ONLY : strf, vloc
-  USE wvfct,                ONLY : igk, g2kin, et, wg, btype
+  USE wvfct,                ONLY : g2kin, et, wg, btype
   USE force_mod,            ONLY : force
   USE scf,                  ONLY : rho, v, vltot, rho_core, rhog_core, &
                                    vrs, kedtau, destroy_scf_type, vnew
@@ -41,10 +44,10 @@ SUBROUTINE clean_pw( lflag )
   USE uspp_param,           ONLY : upf
   USE m_gth,                ONLY : deallocate_gth
   USE ldaU,                 ONLY : deallocate_ldaU
-  USE extfield,             ONLY : forcefield
+  USE extfield,             ONLY : forcefield, forcegate
   USE fft_base,             ONLY : dfftp, dffts  
-  USE stick_base,           ONLY : sticks_deallocate
-  USE fft_types,            ONLY : fft_dlay_deallocate
+  USE fft_base,             ONLY : pstickdealloc
+  USE fft_types,            ONLY : fft_type_deallocate
   USE spin_orb,             ONLY : lspinorb, fcoef
   USE noncollin_module,     ONLY : deallocate_noncol
   USE dynamics_module,      ONLY : deallocate_dyn_vars
@@ -60,12 +63,16 @@ SUBROUTINE clean_pw( lflag )
   USE pseudo_types,         ONLY : deallocate_pseudo_upf
   USE bp,                   ONLY : deallocate_bp_efield
   USE exx,                  ONLY : deallocate_exx
+  USE Coul_cut_2D,          ONLY : cutoff_2D, lr_Vloc 
+  !
+  USE control_flags,        ONLY : ts_vdw
+  USE tsvdw_module,         ONLY : tsvdw_finalize
   !
   IMPLICIT NONE
   !
   LOGICAL, INTENT(IN) :: lflag
   !
-  INTEGER :: nt
+  INTEGER :: nt, nr1,nr2,nr3
   !
   IF ( lflag ) THEN
      !
@@ -84,11 +91,13 @@ SUBROUTINE clean_pw( lflag )
      !
      IF ( ALLOCATED( force ) )      DEALLOCATE( force )
      IF ( ALLOCATED( forcefield ) ) DEALLOCATE( forcefield )
+     IF ( ALLOCATED( forcegate ) )  DEALLOCATE( forcegate )
      IF ( ALLOCATED( irt ) )        DEALLOCATE( irt )
      !
      CALL dealloca_london()
      CALL cleanup_xdm()
      CALL deallocate_constraint()
+     CALL deallocate_tetra ( )
      !
   END IF
   !
@@ -97,7 +106,6 @@ SUBROUTINE clean_pw( lflag )
   CALL deallocate_ldaU ( lflag )
   !
   IF ( ALLOCATED( f_inp ) .and. lflag )      DEALLOCATE( f_inp )
-  IF ( ALLOCATED( tetra ) )      DEALLOCATE( tetra )
   !
   ! ... arrays allocated in ggen.f90
   !
@@ -134,7 +142,9 @@ SUBROUTINE clean_pw( lflag )
   !
   ! ... arrays allocated in allocate_locpot.f90 ( and never deallocated )
   !
-  IF ( ALLOCATED( vloc ) )       DEALLOCATE( vloc )
+  IF ( ALLOCATED( vloc ) )       DEALLOCATE( vloc ) 
+  IF ( ALLOCATED( cutoff_2D ) )  DEALLOCATE( cutoff_2D )
+  IF ( ALLOCATED( lr_Vloc ) )    DEALLOCATE( lr_Vloc )
   IF ( ALLOCATED( strf ) )       DEALLOCATE( strf )
   IF ( ALLOCATED( eigts1 ) )     DEALLOCATE( eigts1 )
   IF ( ALLOCATED( eigts2 ) )     DEALLOCATE( eigts2 )
@@ -142,8 +152,6 @@ SUBROUTINE clean_pw( lflag )
   !
   ! ... arrays allocated in allocate_nlpot.f90 ( and never deallocated )
   !
-  IF ( ALLOCATED( ngk ) )        DEALLOCATE( ngk )
-  IF ( ALLOCATED( igk ) )        DEALLOCATE( igk )
   IF ( ALLOCATED( g2kin ) )      DEALLOCATE( g2kin )
   IF ( ALLOCATED( qrad ) )       DEALLOCATE( qrad )
   IF ( ALLOCATED( tab ) )        DEALLOCATE( tab )
@@ -152,8 +160,9 @@ SUBROUTINE clean_pw( lflag )
      IF ( ALLOCATED( fcoef ) )   DEALLOCATE( fcoef )
   END IF
   !
+  CALL deallocate_igk ( )
   CALL deallocate_uspp() 
-  CALL deallocate_gth() 
+  CALL deallocate_gth( lflag ) 
   CALL deallocate_noncol() 
   !
   ! ... arrays allocated in init_run.f90 ( and never deallocated )
@@ -169,12 +178,23 @@ SUBROUTINE clean_pw( lflag )
   !
   ! ... fft structures allocated in data_structure.f90  
   !
-  CALL fft_dlay_deallocate( dfftp )
-  CALL fft_dlay_deallocate( dffts )
+  ! UGLY HACK WARNING: unlike previous versions, fft_type_deallocate
+  ! removes all information about FFT grids, including FFT dimensions.
+  ! If however FFT dimensions were set from input data, one may end
+  ! up with a different grid if FFT grids are re-initialized later.
+  ! The following workaround restores the previous functionality.
+  ! TODO: replace clean_pw with more fine-grained cleaning routines.
+  nr1 = dfftp%nr1; nr2 = dfftp%nr2; nr3 = dfftp%nr3
+  CALL fft_type_deallocate( dfftp )
+  dfftp%nr1 = nr1; dfftp%nr2 = nr2; dfftp%nr3 = nr3
+  !
+  nr1 = dffts%nr1; nr2 = dffts%nr2; nr3 = dffts%nr3
+  CALL fft_type_deallocate( dffts )
+  dffts%nr1 = nr1; dffts%nr2 = nr2; dffts%nr3 = nr3
   !
   ! ... stick-owner matrix allocated in sticks_base
   !
-  CALL sticks_deallocate()
+  CALL pstickdealloc()
   !
   ! ... arrays allocated for dynamics
   !
@@ -192,6 +212,8 @@ SUBROUTINE clean_pw( lflag )
   if (use_wannier) CALL wannier_clean()
   !
   CALL deallocate_exx ( ) 
+  !
+  IF (ts_vdw) CALL tsvdw_finalize()
   !
   CALL plugin_clean( lflag )
   !

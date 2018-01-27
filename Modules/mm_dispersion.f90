@@ -22,12 +22,12 @@ MODULE london_module
   SAVE
   !
   !
-  REAL ( DP ) , ALLOCATABLE , PRIVATE :: C6_i  ( : ) ,     &
-                                         R_vdw ( : ) ,     &
-                                         C6_ij ( : , : ) , &
-                                         R_sum ( : , : ) , &
-                                         r     ( : , : ) , &
-                                         dist2 ( : )
+  REAL ( DP ) , ALLOCATABLE :: C6_i  ( : ) ,     &
+                               R_vdw ( : ) ,     &
+                               C6_ij ( : , : ) , &
+                               R_sum ( : , : ) , &
+                               r     ( : , : ) , &
+                               dist2 ( : )
   !
   ! C6_i  ( ntyp )        : atomic C6 coefficient of each atom type
   ! R_vdw ( ntyp )        : Van der Waals Radii of each atom type
@@ -36,17 +36,19 @@ MODULE london_module
   ! r     ( 3 , mxr )     : ordered distance vectors
   ! dist2 ( mxr )         : ordered distances
   !
-  REAL ( DP ) , PUBLIC :: scal6=0._dp , lon_rcut=0._dp , in_C6 ( nsx )
+  REAL ( DP ) , PUBLIC :: scal6=0._dp , lon_rcut=0._dp , &
+       in_C6 ( nsx ) = -1.0_dp, in_rvdw( nsx ) = -1.0_dp
   !
   ! scal6    : global scaling factor
   ! lon_rcut : public cut-off radius
   ! in_C6 ( ntyp ) : input (user) specified atomic C6 coefficients
+  ! in_rvdw ( ntyp ) : input (user) specified atomic vdw radii
   !
-  INTEGER , PRIVATE :: mxr
+  INTEGER :: mxr
   !
   ! max number of r ( see rgen)
   !
-  REAL ( DP ) , PRIVATE :: r_cut , beta = 20.0_DP
+  REAL ( DP ) :: r_cut , beta = 20.0_DP
   !
   ! beta  : damping function parameter 
   ! r_cut : cut-off radius in alat units
@@ -65,6 +67,8 @@ MODULE london_module
                                       atom_label => atm
       !
       USE cell_base ,          ONLY : alat, omega
+      !
+      USE constants,           ONLY : eps16
       !
       USE io_global,           ONLY : ionode, ionode_id, stdout
       !
@@ -206,12 +210,16 @@ MODULE london_module
            !
            i = atomic_number ( atom_label ( ilab ) )
            IF ( i > 0 .AND. i < 87 ) THEN
-              IF ( in_C6 (ilab) > 0.0_DP ) THEN
+              IF ( in_C6 (ilab) > -eps16 ) THEN
                  C6_i  ( ilab )  = in_C6 (ilab)
               ELSE
                  C6_i  ( ilab )  = vdw_coeffs(1,i)
               END IF
-              R_vdw ( ilab )  = vdw_coeffs(2,i)
+              IF ( in_rvdw (ilab) > 0.0_DP ) THEN
+                R_vdw ( ilab )  = in_rvdw (ilab)
+              ELSE
+                R_vdw ( ilab )  = vdw_coeffs(2,i)
+              END IF
            ELSE
              CALL errore ( ' init_london ' ,&
                            'atom ' // atom_label(ilab) //' not found ' , ilab )
@@ -223,8 +231,8 @@ MODULE london_module
          !
          DO ilab = 1 , ntyp
            !
-           IF ( ( C6_i  ( ilab ) < 0.d0 ) .or. &
-                ( R_vdw ( ilab ) < 0.d0 ) ) THEN
+           IF ( ( C6_i  ( ilab ) < -eps16 ) .or. &
+                ( R_vdw ( ilab ) < 0.0_DP ) ) THEN
              !
              CALL errore ( ' init_london ' ,&
                            ' one or more parameters not found ' , 4 )
@@ -380,7 +388,9 @@ MODULE london_module
           !
           CALL rgen ( dtau, r_cut, mxr, at, bg, r, dist2, nrm )
           !
+#if defined(__INTEL_COMPILER) && (__INTEL_COMPILER < 1600)
 !$omp parallel do private(nr,dist,dist6,f_damp) default(shared), reduction(-:energy_london)
+#endif
           DO nr = 1 , nrm
             !
             dist  = alat * sqrt ( dist2 ( nr ) )
@@ -401,7 +411,9 @@ MODULE london_module
                   f_damp
             !
           END DO
+#if defined(__INTEL_COMPILER) && (__INTEL_COMPILER < 1600)
 !$omp end parallel do
+#endif
           !
         END DO
         !
@@ -515,7 +527,9 @@ MODULE london_module
            par = beta / ( R_sum ( ityp ( atb ) , ityp ( ata ) ) )
            !
            aux(:) = 0.d0
+#if defined(__INTEL_COMPILER) && (__INTEL_COMPILER < 1600)
 !$omp parallel do private(nr,dist,dist6,dist7,exparg,expval,fac,add,ipol) default(shared), reduction(+:aux)
+#endif
            DO nr = 1 , nrm
             !
             dist  = alat * sqrt ( dist2 ( nr ) )
@@ -538,7 +552,9 @@ MODULE london_module
             END DO
             !
            END DO
+#if defined(__INTEL_COMPILER) && (__INTEL_COMPILER < 1600)
 !$omp end parallel do 
+#endif
            DO ipol = 1 , 3
               force_london ( ipol , ata ) = force_london ( ipol , ata ) + aux(ipol)
            ENDDO

@@ -8,7 +8,9 @@
 
 package require Tk       
 #package require Itcl
-package require Itk      
+if { [catch {package require Itk}] } {
+    package require itk
+}
 package require Iwidgets 
 
 # We need to import all of the itcl functions into the global
@@ -40,10 +42,10 @@ namespace eval ::guib {
     #------------------------------------------------------------------------            
 
     # regular expresion for the for the endlist-string
-    set settings(NAMELIST.end_regexp) {^ &end|^/|^ /}
+    set settings(NAMELIST.end_regexp) {^ *&end|^ */}
 
     # string to write for the end-of-namelist
-    set settings(NAMELIST.end_string) { &end}
+    set settings(NAMELIST.end_string) { /}
 
     # case-sensitivity of namelists variable names (i.e., _nocase like
     # the "-nocase" tcl-option)    

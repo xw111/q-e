@@ -97,7 +97,7 @@ subroutine matrix_wannier_gamma_big( matsincos, ispin, n_set, itask )
   USE mp,                   ONLY : mp_bcast,mp_barrier,mp_sum
   USE mp_world,             ONLY : world_comm
   USE fft_base,             ONLY : dffts,dfftp
-  USE wvfct,    ONLY : nbnd, ecutwfc
+  USE wvfct,    ONLY : nbnd
 
  implicit none
 
@@ -138,11 +138,11 @@ subroutine matrix_wannier_gamma_big( matsincos, ispin, n_set, itask )
   allocate(tmprealis(dffts%nnr,n_set),tmprealjs(dffts%nnr,n_set), tmpreal(dffts%nnr))
   allocate(tmpexp2(dffts%nnr,6))
 
-!set npp for not parallel case
+!set nr3p for not parallel case
 
-#ifndef __MPI
-  dfftp%npp(1) = dfftp%nr3
-  dffts%npp(1) = dffts%nr3
+#if !defined(__MPI)
+  dfftp%nr3p(1) = dfftp%nr3
+  dffts%nr3p(1) = dffts%nr3
 #endif
 
 
@@ -153,7 +153,7 @@ subroutine matrix_wannier_gamma_big( matsincos, ispin, n_set, itask )
 
   tmpexp2(:,:)=(0.d0,0.d0)
 
-#ifndef __MPI
+#if !defined(__MPI)
   iqq=0
   do ix=1,dffts%nr1
      do iy=1,dffts%nr2
@@ -177,10 +177,10 @@ subroutine matrix_wannier_gamma_big( matsincos, ispin, n_set, itask )
   nr3s_end =0
   do ii=1,me_pool + 1
      nr3s_start=nr3s_end+1
-     nr3s_end=nr3s_end+dffts%npp(ii)
+     nr3s_end=nr3s_end+dffts%nr3p(ii)
   end do
   tmpexp2(:,:)=(0.d0,0.d0)
-  do iz=1,dffts%npp(me_pool+1)
+  do iz=1,dffts%my_nr3p
      do iy=1,dffts%nr2
         do ix=1,dffts%nr1
            iqq=(iz-1)*(dffts%nr1x*dffts%nr2x)+(iy-1)*dffts%nr1+ix
@@ -275,7 +275,7 @@ subroutine matrix_wannier_gamma_big( matsincos, ispin, n_set, itask )
     expgsave(:,:,:,:)=0.d0
    do mdir=1,3
 
-#ifndef __MPI
+#if !defined(__MPI)
       if(mdir==1) then
          do ix=1,dfftp%nr1
             ee=exp(cmplx(0.d0,1.d0)*tpi*real(ix)/real(dfftp%nr1))
@@ -313,10 +313,10 @@ subroutine matrix_wannier_gamma_big( matsincos, ispin, n_set, itask )
       nr3_end =0
       do ii=1,me_pool + 1
          nr3_start=nr3_end+1
-         nr3_end=nr3_end+dfftp%npp(ii)
+         nr3_end=nr3_end+dfftp%nr3p(ii)
       end do
 
-      do iz=1,dfftp%npp(me_pool+1)
+      do iz=1,dfftp%nr3p(me_pool+1)
          do iy=1,dfftp%nr2
             do ix=1,dfftp%nr1
 
@@ -355,7 +355,7 @@ subroutine matrix_wannier_gamma_big( matsincos, ispin, n_set, itask )
 
      expgsave(:,:,:,mdir)=expgsave(:,:,:,mdir)*omega/dble(dfftp%nr1*dfftp%nr2*dfftp%nr3)
 
-#ifdef __MPI
+#if defined(__MPI)
  !    call reduce (2  *maxval(nh) *maxval(nh)* nat, expgsave(:,:,:,mdir))
      call mp_sum( expgsave(:,:,:,mdir),world_comm)
 #endif

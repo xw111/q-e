@@ -1,8 +1,351 @@
+New in 6.2.1 version:
+
+  * Spin-polarized SCAN meta-GGA; spin-unpolarized stress for meta-GGA
+    (Hsin-Yu Ho and Marcos Calegari Andrade)
+
+  * Interface with Grimme's DFT-D3, as repackaged by Bálint Aradi
+    (Miha Gunde and Layla Martins-Samos)
+  
+  * Phonons for two-dimensional systems (Thibault Sohier et al.)
+
+Problems fixed in 6.2.1 version:
+
+  * PWscf in "driver" mode with i-Pi wasn't working with k-points and
+    wasn't honoring options for interpolation - fixed by Przemyslaw Juda
+    (r14037)
+
+  * Restart in phonon wasn't working with tetrahedra (r14029)
+    and for USPP/PAW at q != 0 (r14034-14036)
+
+  * QM-MM interface with LAMMPS was broken in v.6.2 (r14006-14008)
+
+  * NASTY BUG IN META-GGA WITH LIBXC (tpss, tb09, scan): incorrect results -
+    fixed by Hsin-Yu Ho and Marcos Calegari Andrade (r14000, 14004-5, 14027)
+
+  * Electron-phonon with ibrav=0 not working due to a mismatch between
+    what is written and what is read in "fildyn" (r13999)
+
+  * Tetrahedra with "old" XML format working again (r13993)
+
+  * Option "-in file" for fermi_proj.x and fermi_velocity.x was not working
+    in serial execution; fermisurfer_example/ was missing (r13986). Also:
+    Fermi velocity in vfermi.frmsf was 4*celldm(1) times bigger than in
+    fermisurfer (reported by Victor Chang, fixed by Mitsuaki Kawamura, r14033)
+
+  * Inconsistent "short name" for DFT was breaking Perdew-Wang pseudopotentials
+    (r13975)
+
+  * Yet another problem with last scf step in vc-relax, present since v.6.1: 
+    if no atoms of a given kind were present, there was a division by zero
+    and a NaN in starting magnetization (reported by Malte Sachs) (r13971)
+
+  * FFT's for ARM libraries were broken (r13956,13959, courtesy Jason Wood)
+
+Known problems in 6.2.1 version:
+
+  * pw2bgw.x not working
+
+  * QM-MM not yet working; COUPLE interface not aligned with new parallelism
+
+  * New format for charge density no longer allows to perform a non-scf
+    calculation with k-points starting from a scf calculation at Gamma
+
+  * NEB with one k-point per pool requires "wf_collect=.false.", because
+    update_neb is not updated for the new format
+
+Incompatible changes in 6.2.1 version:
+
+  * __OPENMP with two underscores (set by configure) replaced by _OPENMP
+    with one underscore (automatically set by all OpenMP-aware compilers)
+
+  * "Old" xml input file deleted
+
+New in 6.2 version:
+
+  * SCAN functional with libxc v.3; bands with meta-GGA can be computed
+   (Davide Ceresoli)
+
+  * EXX with localization (experimental)
+
+  * Stress calculation is enabled in ESM
+    “starting_charge” option added to SYSTEM namelist
+
+  * Unscreened hybrid vdW-DF (JCP 146, 234106 (2017), contributed by 
+    Per Hyldgaard and Jeff Neaton
+
+Fixed in 6.2 version
+
+  * DFPT with constrained magnetization for insulators wasn't working
+    (r13915)
+
+  * virtual.x was linking a duplicate obsolete "pseudo" module, leading to
+    "unrecognized dft" error (fix provided by Stefano Dal Forno, r13910)
+
+  * NEB + EXX works again (r13851)
+
+  * Under some circumstances (k-points, reduced ecutfock, other unclear  
+    reasons), EXX with reduced cutoff wasn't giving accurate results, 
+    due to a mismatch between the ordering of G-vectors in the original 
+    FFT grid and in the grid for ecutfock. Also fixed: incorrect indices
+    of -G (used in Gamma-only case) when nr1 /= nr2 (r13833)
+
+  * Variable-cell glitches: with EXX, G-vectors used in the FFT of 1/|r-r'|
+    should be rescaled as well (courtesy Satomichi Nisihara) (r13817);
+    with tetrahedra, deallocation must be done only at the end (r13932).
+
+  * Bug in DFPT with tetrahedra and in "fermisurfer", plus some extensions
+    to el-ph with tetrahedra (Mitsuaki Kawamura) (r13806).
+
+  * EXX with k-points and pool parallelization was occasionally crashing
+    due to questionable custom FFT grid initialization (r13728+r13835)
+
+  * ESM energy and forces for 'bc2' case and nonzero esm_efield were not
+    correct (r13727). Also: problem with restart in NEB with ESM fixed
+
+  * __USE_3D_FFT was broken since v.6.0 (r13700, r13706)
+
+  * Some constants in the definition of PBE functionals were truncated to 
+    6 significant digits. While not a bug, this could lead to tiny differences
+    with respect to previous results and other XC implementations (r13592)
+
+  * Examples for magnetic anisotropy with force theorem were not properly
+    updated (r13534)
+
+  * Orthogonalization of Hubbard manifold in LDA+U with non-default values
+    of U_projection_type was not properly done in v.6.0 and 6.1 (r13529)
+    Thanks to Andrea Ferretti and Mike Atambo for fixing this.
+
+  * Bug in parallel FFT when task groups are used and the number of XY planes 
+    is not a multiple of the number of MPI tasks and of task groups (r13489)
+
+  * Born effective charges with "Zeu" method were not correctly computed 
+    when both GGA and core corrections were present (r13474 and r13481).
+    Thanks to Vineet Kumar Pandey for reporting the problem.
+
+  * reset_grid wasn't resetting grid properly if k1,k2,k3=0. Thanks to
+    Giuliana Barbarino (r13462)
+
+  * EXX in noncolinear/spin-orbit case wasn't correct (r13453)
+
+  * Fixed a small bug in two subroutines only called by Environ (r13451)
+
+  * Out-of-bounds error in hybrid functionals with LSDA, Gamma tricks and
+    2 pools (r13448)
+
+  * EPW: in v.6.1 there was a mismatch between symmetry operations in PW
+    and in EPW. It affected results of v.6.1 only in the presence of
+    fractional translations incommensurate with the FFT grid. (r13443)
+
+  * FFTXlib: the case in which the smooth and dense grids have the same FFT
+    dimensions along x and y but different along z was incorrectly treated,
+    leading to strange error messages. (r13439 and r13445)
+
+  * There was a small inconsistency in the vdW-DF kernel generating routine
+    "generate_vdW_kernel_table.f90", not affecting in any significant way 
+    the results. It is anyway recommended to re-generate the kernel file.
+    Thanks to C.Y. Ren for noticing this. (r13438)
+
+Incompatible changes in 6.2 version:
+
+  * MAJOR restructuring of the distribution:
+    - diagonalizers moved to KS_Solvers/
+    - general utility modules moved to UtilXlib/
+  * MAJOR restructuring of parallel FFTs, affecting ordering of real-space
+    arrays
+  * Restructuring of C routines, introduction of ISO_C_BINDING:
+    - memstat moved to module wrappers
+    - f_wall and f_tcpu, in module mytime, replace previous fortran wrappers 
+      for cclock and scnds, respectively. The latter remain as C functions.
+    - fft_defs.h and related configure and makedep stuff deleted
+  * module pwcom no longer contains modules gvect, gvecs, references to
+    some variables in modules constants, cell_base
+  * The new XML format with schema is now the default. Use configure option
+    "--disable-xml", or add -D__OLDXML to MANUAL_FLAGS in make.inc, to revert
+    to the old xml format. IMPORTANT NOTICE: the new format is incompatibile 
+    both with the "old" format and with the previous "new" one: files may be
+    in different locations with different names and contain different data.
+    IMPORTANT NOTICE 2: the "collected" format is now the default
+    IMPORTANT NOTICE 3: the new format uses FoX instead of iotk
+  * Hybrid functionals: ACE is now the default for scf calculations (it wasn't
+    in 6.1 contrary to what previously stated in this file); it is disabled
+    for TD-DFPT. See variable "use_ace".
+
+New in 6.1 version:
+
+  * Hybrid functionals: Band parallelization over pair of bands, contributed
+    by Taylor Barnes et al, http://dx.doi.org/10.1016/j.cpc.2017.01.008
+  * Hybrid functionals with PAW now work
+  * Optimized tetrahedron method, contributed by Mitsuaki Kawamura, U. Tokyo
+  * PostProcessing: pp.x can now plot many bands in a single run.
+    Contributed by Leopold Talirz, U. York
+
+Incompatible changes in 6.1 version:
+
+  * Routine h_psiq deleted, replaced by h_psi
+  * Many variables related to tetrahedron method moved around
+  * Functions set_sym and find_sym no longer require FFT grid dimensions as 
+    input arguments, no longer force consistency of symmetries with FFT grids
+
+Fixed in 6.1 version
+
+  * TDDFPT: the keyword ltammd was missing in the namelist lr_dav
+  * PW: real instead of complex constants in two ZGEMM calls could lead
+        to NaN's in DFT_U forces with some compilers (e.g. PGI) (r13289)
+  * pwi2xsf utility, also used in XCrysDen: various fixes (r13197)
+  * PP: incorrect results in "projwfc.x" with PAW projection due to a missing
+        line (r13121); crash in pw_export.x" due to dumb error (r13189);
+        incorrect Fermi energy used in calculation of magnetic anisotropy
+        with force theorem (r13335)
+  * PW: final scf step in variable-cell calculation could crash
+        due to missing reset of FFT dimensions (r13116)
+  * FD: dangerous "q==0" check in matdyn.f90 (r13109)
+  * Misc errors in new schema-based xml I/O (r13110, r13113)
+  * CPV: stress and potential in nonlocal vdw-DF case were not correctly
+         computed (r13102, r13143)
+  * PWGui: double-hyphen glitch with old tcllib for NEB (r13101)
+  * GWW wasn't working at all (r13099, r13100, r13106)
+  * PW with hybrid functionals: 
+    - LSDA with Gamma tricks and 2 pools did not work (r13158)
+    - ACE energy slightly off, leading to crash, for metals (r13095)
+      and for USPP (r13111)
+    - small error in gamma-only USPP hybrid calculations using G space
+      could lead to crashes (r13142)
+  * Some Wyckoff site labels were incorrect (r13083, r13124)
+    Also: symmetry analysis improved (r13094)
+
+New in 6.0 version:
+
+  * Socket interface with i-PI universal force engine (ipi-code.org)
+  * New I/O: XML data file according to the XML Schema, initial implementation
+    of HDF5 binary files (experimental, activate with -D__XSD and -D__HDF5)
+  * Non-collinear magnetism implemented in epsilon.x, code restructuring
+    (Tae-Yun Kim, Andrea Ferretti, Cheol-Hwan Park)
+  * Lin Lin's ACE (Adaptively Compressed Exchange) for hybrid functionals
+    (experimental, activate with -D__EXX_ACE) (Ivan Carnimeo)
+  * Improved real-space treatment of Q and beta functions with Fourier
+    filtering (Stefano de Gironcoli)
+  * Support for new, improved Goedecker-Hutter-Teter pseudopotentials
+    generated by Santana Saha (Sebastiano Caravati)
+  * EPW: Automatic documentation using Ford
+  * EPW: Restart after epmatwp1 is written with arbitrary number of cores
+  * EPW: Electron and Phonon bandstructure can now be computed using band_plot
+         with etf_mem true or false.
+  * EPW: The test-farm now checks 5 representative examples and the associated
+         accuracy
+  * Netlib LAPACK updated, easy to update going forward
+  * Added support to modern ELPA (2016.05 and 2015.11)
+  * Added emacs modes for editing QE input, in GUI/QE-modes (Tone Kokalj)
+
+Fixed in 6.0 version:
+
+  * TDDFPT, PWCOND, GWW: redirection to /dev/null broke Windows executable
+    (commit 12357)
+  * PDOS in the noncolinear case was broken by recent changes in indexing 
+    (courtesy Mitsuaki Kawamura) (commit (12366)
+  * Incorrect format (old version) of the dynamical matrix if ibrav=0 in PHCG
+    (commit 12367,12369) and incorrect format if more than 99 atoms
+    (commit 12393) (courtesy Shaofeng Wang)
+  * disk_io='high' crashing in MD runs (courtesy David Strubbe)
+    (commit 12388)
+  * Fix for NEB+hybrid functionals (courtesy Davide Colleoni)
+    (commit 12391)
+  * Incorrect Wyckoff site labels for group #138, origin_choice=2
+    (courtesy Marton Voros) (commit 12426)
+  * PHonon: support for Goedecker-Hutter-Teter pseudopotentials was missing
+    (courtesy of Sebastiano Caravati)
+  * turboTDDFPT: Problem if empty states were also computed. 
+  * NEB did not recognize its own input if white spaces were present at the
+    right of NEB cards (commit 12816)
+  * startingwfc='file' with wavefunctions in collected format could yield a 
+    bogus "unit not open" error (commit 12913)
+  * PW and CP: possible out-of-bound error in TS-vdW due to incorrect 
+    allocation of array UtsvdW (commit 12917)
+  * EPW: Correct Wannier localization with spinors
+  * EPW: Correct Wannier localization with spinors
+  * EPW: Electronic velocities in the local approximation now works correctly
+    with skipped bands and spin-orbit coupling
+
+Incompatible changes in 6.0 version:
+
+  * Support for AIX removed
+  * The hamiltonian h_psi no longer needs "npw" and "igk" to be initialized
+    via module "wvfct", but it needs "current_k" to be set to the index of
+    the current k-point
+  * k-point dependent variables npw, igk, and (in LR codes) npwq, igkq, 
+    become local and point to global variables "ngk" and "igk_k", via the
+    k-point index "ik" or, in LR codes, via "ikks" and "ikkq" indices.
+    The global variables are computed once, stored in memory, no I/O is done.
+    Variable "iunigk" deleted (contained unit for I/O of indices).
+  * "nbnd_occ" variable is now dynamically allocated
+  * Duplicated and confusing "outdir" variable removed from "io_files"
+  * Due to frequent problems with mailers, "make.sys" is renamed "make.inc"
+  * "allocate_fft" no longer calls "data_structure" to compute dimensions
+    of the various grids: it just allocates FFT arrays
+  * QE-GPU plugin not compatible with 6.x (new version is WIP)
+  * Configure options "--with-internal-lapack" & "--with-internal-blas" have
+    been replaced by a single "--with-netlib". Netlib LAPACK is self-compiled 
+    (and also Netlib BLAS which is packaged with it).
+
+                               * * * * *
+
+New in 5.4 version:
+
+  * Calculation of the Magnetic anisotropy energy is implemented (in the limit 
+    of small spin-orbit coupling) using the Force theorem (A. Smogunov)
+  * Support for FFT with ARM Performance Library (-D__ARM_LIB) added (F. Spiga)
+  * Non-blocking FFT communications (-D__NON_BLOCKING_SCATTER) (C. Cavazzoni)
+  * Bethe-Salpeter equation added to GWL (P. Umari)
+  * Support for QM-MM using MPI (C. Cavazzoni and M. Ippolito)
+  * Phonons with vdw-DF (S. de Gironcoli and R. Sabatini) and with DFT-D2
+    (P. Giannozzi and F. Masullo) 
+  * Addition of EPW to compute electron-phonon properties using Wannier 
+    interpolations (S. Poncé, E. R. Margine, C. Verdi, and F. Giustino).
+
+Fixed in 5.4 version:
+
+  * New configure wasn't working properly for some Macintosh due to a
+    missing line (commit 11976) and on BG (commit 12333)
+  * Possible conflict between FFTW in MKL and in Modules/fftw.c solved 
+    (commit 11980)
+  * Incorrect printout from bands.x for nspin=2 (commit 12064)
+  * parallel make broken by missing dependency (commit 12076)
+  * generate_vdW_kernel was crashing in parallel on more than 210 processors
+    (210 = default number of different q_i and q_j pairs) (commit 12077)
+  * Incorrect normalization in epsilon.f90 for nspin=2, some inaccuracy
+    for 'mv' and 'mp' smearing (courtesy of Tae Yun Kim and Cheol-Hwan Park,
+    Seoul National University) (commit 12082)
+  * Incorrect sum over pools in epsilon.f90 for nspin=2 (courtesy of Mariella
+    Ippolito, CINECA) (commit 12218)
+  * Hybrid functionals with USPP and k-point parallelization now work 
+    (commit 12242)
+  * Raman with no symmetry wasn't working properly due to bad logic of
+    routines symmatrix3 and symtensor3 (courtesy of Marc Blanchard and
+    Michele Lazzeri, IMPMC) (commit 12334)
+
+Incompatible changes in 5.4 version:
+
+  * Directories PW/tests/ and CPV/tests/ deleted, superseded by "testcode"
+    tests in test-suite/
+  * k+G indices "igk" no longer written to and read from file (PW only, 
+    will be extended to all codes)
+  * Matrix inversion routines merged into "invmat" in module matrix_inversion
+  * Module "gvecw", in Modules/gvecw.f90, includes previous CP module "gvecw"
+    and several PW variables taken out from module "wvfct":
+    qcutz, ecfixed, q2sigm, ecutwfc
+    New variable gcutw=ecutwfc/tpiba2 used also in PW every time "gk_sort"
+    is called - gcutw is initialized at startup or when data files are read
+  * Common modules for linear-response codes moved to new directory LR_Modules/
+  * Routines for subspace diagonalization moved to LAXlib/
+  * flib/ directory deleted, routines in flib/ moved to Modules/
+
+                               * * * * *
+
 New in 5.3.0 version:
 
   * projwfc.x: PDOS with PAW projectors and all-electron basis functions
   * X3LYP hybrid functional (using VWN_1_RPA)
   * B3LYP hybrid functional (using VWN) and B3LYP-V1R (using VWN_1_RPA)
+  * New modular configure
 
 Fixed in 5.3.0 version:
 
@@ -814,7 +1157,7 @@ Fixed in version 4.0.1:
   * GIPAW: 10^3 factor missing in conversion
   * GIPAW: paw_recon[]%paw_betar[] was not initialised and caused NaN's
     with IBM compilers. Courtesy of Christos Gougoussis (IMPMC, Paris).
-  * Minor glitches in PWgui
+  * Minor glitches in PWGui
   * cppp.x was not working in v.4.0
   * Workaround for bluegene weirdness extended to complex hamiltonians
   * PP/projwfc.f90: Problems with file names in systems > 1000 atoms

@@ -235,13 +235,13 @@
 
 6         FORMAT(/,3X,'Electronic states',/  &
                   ,3X,'-----------------',/  &
-                  ,3X,'Number of Electron = ',I5,', of States = ',I5,/ &
+                  ,3X,'Number of Electrons= ',I5,', of States = ',I5,/ &
                   ,3X,'Occupation numbers :')
 7         FORMAT(2X,10F5.2)
 8         FORMAT(/,3X,'Electronic states',/  &
                   ,3X,'-----------------',/  &
                   ,3X,'Local Spin Density calculation',/ &
-                  ,3X,'Number of Electron = ',I5)
+                  ,3X,'Number of Electrons= ',I5)
 9         FORMAT(  3X,'Spins up   = ', I5, ', occupations: ')
 10        FORMAT(  3X,'Spins down = ', I5, ', occupations: ')
 11        FORMAT(/,3X,'WARNING: system charge = ',F12.6)
@@ -781,7 +781,7 @@ subroutine formf( tfirst, eself )
         rhopsum = SUM( rhops( 1:ngms, is ) )
         call mp_sum( vpsum, intra_bgrp_comm )
         call mp_sum( rhopsum, intra_bgrp_comm )
-        WRITE( stdout,1250) vps(1,is),rhops(1,is)
+        WRITE( stdout,1250) (vps(ig,is),rhops(ig,is),ig=1,5)
         WRITE( stdout,1300) vpsum,rhopsum
      endif
      !
@@ -891,7 +891,7 @@ subroutine nlfh_x( stress, bec_bgrp, dbec, lambda, descla )
   !     contribution to the internal stress tensor due to the constraints
   !
   USE kinds,             ONLY : DP
-  use uspp,              ONLY : nkb, qq
+  use uspp,              ONLY : nkb, qq_nt
   use uspp_param,        ONLY : nh, nhm, nvb, ish
   use ions_base,         ONLY : na
   use electrons_base,    ONLY : nbspx, nbsp, nudx, nspin, nupdwn, iupdwn, ibgrp_g2l
@@ -980,9 +980,9 @@ subroutine nlfh_x( stress, bec_bgrp, dbec, lambda, descla )
                     do iv=1,nh(is)
                        do jv=1,nh(is)
                           inl=ish(is)+(jv-1)*na(is)+ia
-                          if(abs(qq(iv,jv,is)).gt.1.e-5) then
+                          if(abs(qq_nt(iv,jv,is)).gt.1.e-5) then
                              do i = 1, nc
-                                tmpbec(iv,i) = tmpbec(iv,i) +  qq(iv,jv,is) * bec( inl, i, iss  )
+                                tmpbec(iv,i) = tmpbec(iv,i) +  qq_nt(iv,jv,is) * bec( inl, i, iss  )
                              end do
                           endif
                        end do
@@ -1078,7 +1078,7 @@ subroutine nlinit
       use core,            ONLY : rhocb, allocate_core
       use constants,       ONLY : pi, fpi
       use ions_base,       ONLY : na, nsp
-      use uspp,            ONLY : aainit, beta, qq, dvan, nhtol, nhtolm, indv,&
+      use uspp,            ONLY : aainit, beta, qq_nt, dvan, nhtol, nhtolm, indv,&
                                   dbeta
       use uspp_param,      ONLY : upf, lmaxq, nbetam, lmaxkb, nhm, nh, ish, nvb
       use atom,            ONLY : rgrid
@@ -1125,8 +1125,8 @@ subroutine nlinit
       !
       allocate( beta( ngw, nhm, nsp ) )
       allocate( qgb( ngb, nhm*(nhm+1)/2, nsp ) )
-      allocate( qq( nhm, nhm, nsp ) )
-      qq  (:,:,:) =0.d0
+      allocate( qq_nt( nhm, nhm, nsp ) )
+      qq_nt  (:,:,:) =0.d0
       IF (tpre) THEN
          allocate( dqgb( ngb, nhm*(nhm+1)/2, nsp, 3, 3 ) )
          allocate( dbeta( ngw, nhm, nsp, 3, 3 ) )
@@ -1538,11 +1538,12 @@ END SUBROUTINE print_lambda_x
       USE ions_base,          ONLY: na, nsp, nat
       USE io_global,          ONLY: stdout
       USE gvect, ONLY: gstart
-      USE uspp,               ONLY: nkb, qq
+      USE uspp,               ONLY: nkb, qq_nt
       USE uspp_param,         ONLY: nh, ish, nvb
       USE mp,                 ONLY: mp_sum
-      USE mp_global,          ONLY: intra_bgrp_comm, nbgrp
+      USE mp_global,          ONLY: intra_bgrp_comm, nbgrp, inter_bgrp_comm
       USE cp_interfaces,      ONLY: nlsm1
+      USE electrons_base,     ONLY: ispin, ispin_bgrp, nbspx_bgrp, ibgrp_g2l, iupdwn, nupdwn, nbspx
 !
       IMPLICIT NONE
 !
@@ -1552,55 +1553,85 @@ END SUBROUTINE print_lambda_x
       REAL(DP) rsum, csc(n) ! automatic array
       COMPLEX(DP) temp(ngw) ! automatic array
  
-      REAL(DP), ALLOCATABLE::  becp(:,:)
+      REAL(DP), ALLOCATABLE::  becp(:,:), cp_tmp(:), becp_tmp(:)
       INTEGER i,kmax,nnn,k,ig,is,ia,iv,jv,inl,jnl
+      INTEGER :: ibgrp_i, ibgrp_k
 !
-      IF( nbgrp > 1 ) &
-         CALL errore( ' dotcsc ', ' parallelization over bands not yet implemented ', 1 ) 
-!
-      ALLOCATE(becp(nkb,n))
+      ALLOCATE( becp( nkb, nbspx_bgrp ) )
+      ALLOCATE( cp_tmp( SIZE( cp, 1 ) ) )
+      ALLOCATE( becp_tmp( nkb ) )
 !
 !     < beta | phi > is real. only the i lowest:
 !
+
+      CALL nlsm1( nbspx_bgrp, 1, nvb, eigr, cp, becp )
+
       nnn = MIN( 12, n )
 
       DO i = nnn, 1, -1
+
+         csc = 0.0d0
+
+         ibgrp_i = ibgrp_g2l( i )
+         IF( ibgrp_i > 0 ) THEN
+            cp_tmp = cp( :, ibgrp_i )
+         ELSE 
+            cp_tmp = 0.0d0
+         END IF
+
+         CALL mp_sum( cp_tmp, inter_bgrp_comm )
+
          kmax = i
-         CALL nlsm1(i,1,nvb,eigr,cp,becp)
 !
          DO k=1,kmax
-            DO ig=1,ngw
-               temp(ig)=CONJG(cp(ig,k))*cp(ig,i)
-            END DO
-            csc(k)=2.d0*DBLE(SUM(temp))
-            IF (gstart == 2) csc(k)=csc(k)-DBLE(temp(1))
+            ibgrp_k = ibgrp_g2l( k )
+            IF( ibgrp_k > 0 ) THEN
+               DO ig=1,ngw
+                  temp(ig)=CONJG(cp(ig,ibgrp_k))*cp_tmp(ig)
+               END DO
+               csc(k)=2.d0*DBLE(SUM(temp))
+               IF (gstart == 2) csc(k)=csc(k)-DBLE(temp(1))
+            END IF
          END DO
 
          CALL mp_sum( csc( 1:kmax ), intra_bgrp_comm )
 
+         IF( ibgrp_i > 0 ) THEN
+            becp_tmp = becp( :, ibgrp_i )
+         ELSE 
+            becp_tmp = 0.0d0
+         END IF
+
+         CALL mp_sum( becp_tmp, inter_bgrp_comm )
+
          DO k=1,kmax
             rsum=0.d0
-            DO is=1,nvb
-               DO iv=1,nh(is)
-                  DO jv=1,nh(is)
-                     DO ia=1,na(is)
-                        inl=ish(is)+(iv-1)*na(is)+ia
-                        jnl=ish(is)+(jv-1)*na(is)+ia
-                        rsum = rsum +                                    &
-     &                   qq(iv,jv,is)*becp(inl,i)*becp(jnl,k)
+            ibgrp_k = ibgrp_g2l( k )
+            IF( ibgrp_k > 0 ) THEN
+               DO is=1,nvb
+                  DO iv=1,nh(is)
+                     DO jv=1,nh(is)
+                        DO ia=1,na(is)
+                           inl=ish(is)+(iv-1)*na(is)+ia
+                           jnl=ish(is)+(jv-1)*na(is)+ia
+                           rsum = rsum + qq_nt(iv,jv,is)*becp_tmp(inl)*becp(jnl,ibgrp_k)
+                        END DO
                      END DO
                   END DO
                END DO
-            END DO
+            END IF
             csc(k)=csc(k)+rsum
          END DO
 !
+         CALL mp_sum( csc( 1:kmax ), inter_bgrp_comm )
          WRITE( stdout,'("dotcsc =",12f18.15)') (csc(k),k=1,i)
 !
       END DO
       WRITE( stdout,*)
 !
       DEALLOCATE(becp)
+      DEALLOCATE(cp_tmp)
+      DEALLOCATE(becp_tmp)
 !
       RETURN
       END SUBROUTINE dotcsc_x
@@ -1617,7 +1648,7 @@ END SUBROUTINE print_lambda_x
       USE constants,          ONLY: pi, fpi
       USE gvecw,              ONLY: ngw
       USE gvect,              ONLY: gstart
-      USE gvecw,              ONLY: ggp
+      USE gvecw,              ONLY: g2kin
       USE mp,                 ONLY: mp_sum
       USE mp_global,          ONLY: intra_bgrp_comm
       USE cell_base,          ONLY: tpiba2
@@ -1640,7 +1671,7 @@ END SUBROUTINE print_lambda_x
       DO i=1,n
          sk(i)=0.0d0
          DO ig=gstart,ngw
-            sk(i)=sk(i)+DBLE(CONJG(c(ig,i))*c(ig,i))*ggp(ig)
+            sk(i)=sk(i)+DBLE(CONJG(c(ig,i))*c(ig,i))*g2kin(ig)
          END DO
       END DO
 
@@ -1668,7 +1699,7 @@ END SUBROUTINE print_lambda_x
       USE kinds,             ONLY: DP
       USE io_global,         ONLY: stdout
       USE ions_base,         ONLY: na, nsp, nat
-      USE uspp,              ONLY: nhsa=>nkb, qq
+      USE uspp,              ONLY: nhsa=>nkb, qq_nt
       USE uspp_param,        ONLY: nhm, nh, ish, nvb
       USE electrons_base,    ONLY: nspin, iupdwn, nupdwn, nbspx_bgrp, ibgrp_g2l, i2gupdwn_bgrp, nbspx, &
                                    iupdwn_bgrp, nupdwn_bgrp
@@ -1767,9 +1798,9 @@ END SUBROUTINE print_lambda_x
                      DO iv=1,nh(is)
                         DO jv=1,nh(is)
                            inl=ish(is)+(jv-1)*na(is)+ia
-                           IF(ABS(qq(iv,jv,is)).GT.1.e-5) THEN
+                           IF(ABS(qq_nt(iv,jv,is)).GT.1.e-5) THEN
                               DO i=1,nc
-                                 tmpbec(iv,i)=tmpbec(iv,i) + qq(iv,jv,is)*bec(inl,i,iss)
+                                 tmpbec(iv,i)=tmpbec(iv,i) + qq_nt(iv,jv,is)*bec(inl,i,iss)
                               END DO
                            ENDIF
                         END DO

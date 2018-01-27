@@ -1,10 +1,11 @@
 # Makefile for X-ray spectra calculation (XSPECTRA)
 
-include ../../make.sys
+include ../../make.inc
 
 # location of needed modules and included files (if any)
 MODFLAGS= $(MOD_FLAG)../../iotk/src $(MOD_FLAG)../../Modules \
-          $(MOD_FLAG)../../FFTXlib $(MOD_FLAG)../../PW/src $(MOD_FLAG).
+          $(MOD_FLAG)../../KS_Solvers/CG $(MOD_FLAG)../../KS_Solvers/Davidson \
+          $(MOD_FLAG)../../LAXlib $(MOD_FLAG)../../FFTXlib $(MOD_FLAG)../../UtilXlib $(MOD_FLAG)../../PW/src $(MOD_FLAG).
 IFLAGS=
 
 XOBJS = \
@@ -31,8 +32,6 @@ XOBJS = \
 ./io_routines.o \
 ./xanes_quadrupole.o 
 
-
-
 GIPAWOBJS=./paw_gipaw.o \
 ./gipaw_module.o \
 ./init_gipaw_1.o \
@@ -40,31 +39,33 @@ GIPAWOBJS=./paw_gipaw.o \
 
 MANIP_XS_OBJ=./gaunt_mod.o 
              
-QEMODS = ../../Modules/libqemod.a ../../FFTXlib/libqefft.a
+QEMODS = ../../Modules/libqemod.a ../../FFTXlib/libqefft.a \
+         ../../KS_Solvers/CG/libcg.a ../../KS_Solvers/Davidson/libdavid.a ../../LAXlib/libqela.a ../../UtilXlib/libutil.a
 PWOBJS = ../../PW/src/libpw.a 
-
-LIBOBJS = ../../iotk/src/libiotk.a ../../flib/flib.a \
-         ../../clib/clib.a ../../flib/ptools.a
 
 TLDEPS = bindir libs pw
 
-all : tldeps xspectra.x spectra_manipulation.x
+all : tldeps xspectra.x spectra_correction.x molecularnexafs.x
 
 xspectra.x :   xspectra.o $(XOBJS) $(GIPAWOBJS) $(QEMODS) $(PWOBJS)
 	$(MPIF90) -o $@  xspectra.o $(XOBJS) $(GIPAWOBJS) \
 		$(PWOBJS) $(QEMODS) $(LDFLAGS) $(LIBOBJS) $(LIBS)
 	- ( cd ../../bin ; ln -fs ../XSpectra/src/$@ . )
 
-spectra_manipulation.x : spectra_manipulation.o $(MANIP_XS_OBJ) $(QEMODS) $(PWOBJS)
-	$(MPIF90) -o $@  spectra_manipulation.o $(MANIP_XS_OBJ) $(PWOBJS) $(QEMODS) \
+spectra_correction.x : spectra_correction.o $(MANIP_XS_OBJ) $(QEMODS) $(PWOBJS)
+	$(MPIF90) -o $@  spectra_correction.o $(MANIP_XS_OBJ) $(PWOBJS) $(QEMODS) \
                 $(LDFLAGS) $(LIBOBJS) $(LIBS)
+	- ( cd ../../bin ; ln -fs ../XSpectra/src/$@ . )
+
+molecularnexafs.x : molecularnexafs.o 
+	$(MPIF90) -o $@  molecularnexafs.o $(LDFLAGS)
 	- ( cd ../../bin ; ln -fs ../XSpectra/src/$@ . )
 
 tldeps : 
 	test -n "$(TLDEPS)" && ( cd ../.. ; $(MAKE) $(MFLAGS) $(TLDEPS) || exit 1) || :
 
 clean :
-	- /bin/rm -f *.x *.o *~ *.F90 *.d *.mod *.i *.L
+	- /bin/rm -f *.x *.o *~ *_tmp.f90 *.d *.mod *.i *.L
 	- /bin/rm -f ../../bin/xspectra.x
 
 include make.depend

@@ -56,8 +56,6 @@ SUBROUTINE cprmain( tau_out, fion_out, etot_out )
   USE local_pseudo,             ONLY : allocate_local_pseudo
   USE io_global,                ONLY : stdout, ionode, ionode_id
   USE dener,                    ONLY : detot
-  !USE cdvan,                    ONLY : drhovan
-  USE gvecw,                    ONLY : ggp
   USE constants,                ONLY : pi, k_boltzmann_au, au_ps
   USE io_files,                 ONLY : psfile, pseudo_dir
   USE wave_base,                ONLY : wave_steepest, wave_verlet
@@ -120,6 +118,7 @@ SUBROUTINE cprmain( tau_out, fion_out, etot_out )
   USE london_module,            ONLY : energy_london, force_london, stres_london
   USE input_parameters,         ONLY : tcpbo
   USE funct,                    ONLY : dft_is_hybrid, start_exx, exx_is_active
+  USE funct,                    ONLY : dft_is_meta
   !
   IMPLICIT NONE
   !
@@ -165,6 +164,7 @@ SUBROUTINE cprmain( tau_out, fion_out, etot_out )
   REAL(DP), ALLOCATABLE :: pmass(:)
   REAL(DP), ALLOCATABLE :: forceh(:,:)
   !
+  REAL(DP) :: exx_start_thr
   CALL start_clock( 'cpr_total' )
   !
   etot_out = 0.D0
@@ -175,6 +175,13 @@ SUBROUTINE cprmain( tau_out, fion_out, etot_out )
   tfirst = .TRUE.
   tlast  = .FALSE.
   nacc   = 5
+  !
+  if (dft_is_meta()) then
+    !HK/MCA : for SCAN0 calculation the initial SCAN has to converge better than the PBE -> PBE0 case
+    exx_start_thr = 1.E+1_DP
+  else
+    exx_start_thr = 1.E+2_DP
+  end if ! dft_is_meta
   !
   ALLOCATE ( pmass (nsp) )
   pmass(1:nsp) = amass(1:nsp) * amu_au
@@ -212,6 +219,7 @@ SUBROUTINE cprmain( tau_out, fion_out, etot_out )
      tfile   = ( MOD( nfi, iprint ) == 0 )
      tstdout = ( MOD( nfi, iprint_stdout ) == 0 ) .OR. tlast
      !
+
      IF ( abivol ) THEN
         IF ( pvar ) THEN
            IF ( nfi .EQ. 1 ) THEN
@@ -370,6 +378,7 @@ SUBROUTINE cprmain( tau_out, fion_out, etot_out )
         END IF
         !
      END IF
+     !
      !
      !=======================================================================
      !
@@ -745,7 +754,7 @@ SUBROUTINE cprmain( tau_out, fion_out, etot_out )
      !
      CALL printout_new( nfi, tfirst, tfile, tprint, tps, hold, stress, &
                         tau0, vels, fion, ekinc, temphc, tempp, temps, etot, &
-                        enthal, econs, econt, vnhh, xnhh0, vnhp, xnhp0, atot, &
+                        enthal, econs, econt, vnhh, xnhh0, vnhp, xnhp0, vnhe, xnhe0, atot, &
                         ekin, epot, tprnfor, tpre, tstdout )
      !
      if (abivol) etot = etot + P_ext*volclu
@@ -773,8 +782,6 @@ SUBROUTINE cprmain( tau_out, fion_out, etot_out )
         END IF
         !
      END IF
-     !
-     !IF ( thdyn .AND. tfirst ) CALL emass_precond( ema0bg, ggp, ngw, tpiba2, emass_cutoff ) ! BS: Possibly not needed
      !
      ekincm = ekinc0
      !  
@@ -862,7 +869,7 @@ SUBROUTINE cprmain( tau_out, fion_out, etot_out )
      !
      IF( .NOT.exx_is_active().AND.dft_is_hybrid().AND.tconvthrs%active ) THEN
        !
-       IF(delta_etot.LT.tconvthrs%derho*1.E+2_DP) THEN
+       IF(delta_etot.LT.tconvthrs%derho*exx_start_thr) THEN
          !
          WRITE(stdout,'(/,3X,"Exact Exchange is turned on ...")')
          ! 
@@ -1100,7 +1107,9 @@ SUBROUTINE terminate_run()
   CALL print_clock( 'fft' )
   CALL print_clock( 'ffts' )
   CALL print_clock( 'fftw' )
-  CALL print_clock( 'fft_scatter' )
+  CALL print_clock( 'fft_scatt_xy' )
+  CALL print_clock( 'fft_scatt_yz' )
+  CALL print_clock( 'fft_scatt_tg' )
   CALL print_clock( 'betagx' )
   CALL print_clock( 'qradx' )
   CALL print_clock( 'tmp_clk1' )
@@ -1131,8 +1140,6 @@ SUBROUTINE terminate_run()
   END IF
   !
   IF (tcg) call print_clock_tcg()
-  !
-  CALL print_clock( 'ALLTOALL' )
   !
   CALL plugin_clock()
   !

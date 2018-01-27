@@ -30,8 +30,6 @@ PROGRAM Q2QSTAR
   USE environment,        ONLY : environment_start, environment_end
   ! symmetry
   USE symm_base,          ONLY : s, invs, nsym, find_sym, set_sym_bl, irt, ftau, copy_sym, nrot, inverse_s
-  ! small group symmetry
-  USE modes,              ONLY : rtau, nsymq, minus_q, irotmq, gi, gimq
   ! for reading the dyn.mat.
   USE cell_base,          ONLY : at, bg, celldm, ibrav, omega
   USE ions_base,          ONLY : nat, ityp, ntyp => nsp, atm, tau, amass
@@ -47,6 +45,8 @@ PROGRAM Q2QSTAR
   USE io_dyn_mat,         ONLY : read_dyn_mat_param, read_dyn_mat_header, &
                                  read_dyn_mat, read_dyn_mat_tail, &
                                  write_dyn_mat_header
+  ! small group symmetry
+  USE lr_symm_base,       ONLY : rtau, nsymq, minus_q, irotmq, gi, gimq
   !
   IMPLICIT NONE
   !
@@ -144,7 +144,7 @@ PROGRAM Q2QSTAR
   WRITE(stdout, '(5x,a,i3)') "Symmetries of bravais lattice: ", nrot
   !
   ! ~~~~~~~~ setup crystal symmetry ~~~~~~~~ 
-  CALL find_sym ( nat, tau, ityp, 6,6,6, .false., m_loc )
+  CALL find_sym ( nat, tau, ityp, .false., m_loc )
   WRITE(stdout, '(5x,a,i3)') "Symmetries of crystal:         ", nsym
   !
   ! ~~~~~~~~ setup small group of q symmetry ~~~~~~~~ 

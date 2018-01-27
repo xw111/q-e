@@ -29,18 +29,20 @@ subroutine ef_shift (drhoscf, ldos, ldoss, dos_ef, irr, npe, flag)
   USE gvect,                ONLY : gg, nl
   USE buffers,              ONLY : get_buffer, save_buffer
   USE lsda_mod,             ONLY : nspin
-  USE wvfct,                ONLY : npw, npwx, et
-  USE klist,                ONLY : degauss, ngauss, ngk
+  USE wvfct,                ONLY : npwx, et
+  USE klist,                ONLY : degauss, ngauss, ngk, ltetra
   USE ener,                 ONLY : ef
   USE noncollin_module,     ONLY : noncolin, npol, nspin_mag, nspin_lsda
 ! modules from phcom
   USE qpoint,               ONLY : nksq
-  USE control_ph,           ONLY : nbnd_occ, lgamma_gamma
+  USE control_lr,           ONLY : nbnd_occ
+  USE control_ph,           ONLY : lgamma_gamma
   USE units_ph,             ONLY : lrwfc, iuwfc, lrdwf, iudwf
   USE eqv,                  ONLY : dpsi
   USE modes,                ONLY : npert
   USE mp_bands,             ONLY : intra_bgrp_comm
   USE mp,                   ONLY : mp_sum
+  USE dfpt_tetra_mod,       ONLY : dfpt_tetra_delta
 
   implicit none
   !
@@ -72,7 +74,7 @@ subroutine ef_shift (drhoscf, ldos, ldoss, dos_ef, irr, npe, flag)
   real(DP), external :: w0gauss
   ! the smeared delta function
 
-  integer :: ibnd, ik, is, ipert, nrec, ikrec
+  integer :: npw, ibnd, ik, is, ipert, nrec, ikrec
   ! counter on occupied bands
   ! counter on k-point
   ! counter on spin polarizations
@@ -127,8 +129,13 @@ subroutine ef_shift (drhoscf, ldos, ldoss, dos_ef, irr, npe, flag)
            if (nksq.gt.1.or.npert(irr).gt.1) &
                 call get_buffer(dpsi, lrdwf, iudwf, nrec)
            do ibnd = 1, nbnd_occ (ik)
-              wfshift = 0.5d0 * def(ipert) * &
-                   w0gauss( (ef-et(ibnd,ik))/degauss, ngauss) / degauss
+              !
+              if(ltetra) then
+                 wfshift = 0.5d0 * def(ipert) * dfpt_tetra_delta(ibnd,ik)
+              else
+                 wfshift = 0.5d0 * def(ipert) * w0gauss( (ef-et(ibnd,ik))/degauss, ngauss) / degauss
+              end if
+              !
               IF (noncolin) THEN
                  call zaxpy (npwx*npol,wfshift,evc(1,ibnd),1,dpsi(1,ibnd),1)
               ELSE
@@ -172,18 +179,20 @@ subroutine ef_shift_paw (drhoscf, dbecsum, ldos, ldoss, becsum1, &
   USE gvect,                ONLY : gg, nl
   USE lsda_mod,             ONLY : nspin
   USE uspp_param,           ONLY : nhm
-  USE wvfct,                ONLY : npw, npwx, et
-  USE klist,                ONLY : degauss, ngauss, ngk
+  USE wvfct,                ONLY : npwx, et
+  USE klist,                ONLY : degauss, ngauss, ngk, ltetra
   USE ener,                 ONLY : ef
 ! modules from phcom
   USE qpoint,               ONLY : nksq
-  USE control_ph,           ONLY : nbnd_occ, lgamma_gamma
+  USE control_lr,           ONLY : nbnd_occ
+  USE control_ph,           ONLY : lgamma_gamma
   USE noncollin_module,     ONLY : noncolin, npol, nspin_lsda, nspin_mag
   USE units_ph,             ONLY : lrwfc, iuwfc, lrdwf, iudwf
   USE eqv,                  ONLY : dpsi
   USE modes,                ONLY : npert
   USE mp_bands,             ONLY : intra_bgrp_comm
   USE mp,                   ONLY : mp_sum
+  USE dfpt_tetra_mod,       ONLY : dfpt_tetra_delta
 
   implicit none
   !
@@ -218,7 +227,7 @@ subroutine ef_shift_paw (drhoscf, dbecsum, ldos, ldoss, becsum1, &
   real(DP), external :: w0gauss
   ! the smeared delta function
 
-  integer :: ibnd, ik, is, ipert, nrec, ikrec
+  integer :: npw, ibnd, ik, is, ipert, nrec, ikrec
   ! counter on occupied bands
   ! counter on k-point
   ! counter on spin polarizations
@@ -274,8 +283,13 @@ subroutine ef_shift_paw (drhoscf, dbecsum, ldos, ldoss, becsum1, &
            if (nksq.gt.1.or.npert(irr).gt.1) &
                 call get_buffer(dpsi, lrdwf, iudwf, nrec)
            do ibnd = 1, nbnd_occ (ik)
-              wfshift = 0.5d0 * def(ipert) * &
-                   w0gauss( (ef-et(ibnd,ik))/degauss, ngauss) / degauss
+              !
+              if(ltetra) then
+                 wfshift = 0.5d0 * def(ipert) * dfpt_tetra_delta(ibnd,ik)
+              else
+                 wfshift = 0.5d0 * def(ipert) * w0gauss( (ef-et(ibnd,ik))/degauss, ngauss) / degauss
+              end if
+              !
               IF (noncolin) THEN
                  call zaxpy (npwx*npol,wfshift,evc(1,ibnd),1,dpsi(1,ibnd),1)
               ELSE

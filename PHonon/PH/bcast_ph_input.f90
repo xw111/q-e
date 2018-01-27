@@ -1,5 +1,5 @@
 !
-! Copyright (C) 2001-2008 Quantum ESPRESSO group
+! Copyright (C) 2001-2016 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -13,24 +13,25 @@ subroutine bcast_ph_input ( )
   !     the other processors
   !
   !
-#ifdef __MPI
+#if defined(__MPI)
 
   use mp, only: mp_bcast
   use mp_world, only: world_comm
+  USE control_lr, ONLY : lgamma, lrpa
   USE control_ph, ONLY : start_irr, last_irr, start_q, last_q, nmix_ph, &
-                         niter_ph, lnoloc, alpha_mix, tr2_ph, lrpa, recover, &
+                         niter_ph, lnoloc, alpha_mix, tr2_ph, recover, &
                          ldisp, reduce_io, zue, zeu, epsil, trans, &
-                         lgamma, ldiag, lqdir, search_sym,  electron_phonon, &
+                         ldiag, lqdir, search_sym,  electron_phonon, &
                          qplot, only_init, only_wfc, low_directory_check
   USE gamma_gamma, ONLY : asr
   USE disp, ONLY : nq1, nq2, nq3
   USE partial, ONLY : nat_todo
   USE freq_ph, ONLY : fpol
   USE output, ONLY : fildvscf, fildyn, fildrho
-  use io_files, ONLY : outdir, prefix
+  use io_files, ONLY : tmp_dir, prefix
   USE control_flags, only: iverbosity, modenum
   USE ramanm, ONLY: lraman, elop, dek, eth_rps, eth_ns
-  USE input_parameters, ONLY: max_seconds
+  USE check_stop, ONLY: max_seconds
   USE input_parameters, ONLY : nk1, nk2, nk3, k1, k2, k3
   USE ions_base,     ONLY : amass
   USE io_global,   ONLY : meta_ionode_id
@@ -40,6 +41,7 @@ subroutine bcast_ph_input ( )
   ! YAMBO >
   USE YAMBO,      ONLY : elph_yambo,dvscf_yambo
   ! YAMBO <
+  USE elph_tetra_mod, ONLY : lshift_q
 
   implicit none
   !
@@ -69,6 +71,7 @@ subroutine bcast_ph_input ( )
   call mp_bcast (elph_yambo, meta_ionode_id, world_comm)
   call mp_bcast (dvscf_yambo, meta_ionode_id, world_comm)
   ! YAMBO <
+  call mp_bcast (lshift_q, meta_ionode_id, world_comm)
   !
   ! integers
   !
@@ -113,7 +116,7 @@ subroutine bcast_ph_input ( )
   call mp_bcast (fildyn, meta_ionode_id, world_comm )
   call mp_bcast (fildvscf, meta_ionode_id, world_comm )
   call mp_bcast (fildrho, meta_ionode_id, world_comm )
-  call mp_bcast (outdir, meta_ionode_id, world_comm )
+  call mp_bcast (tmp_dir, meta_ionode_id, world_comm )
   call mp_bcast (prefix, meta_ionode_id, world_comm )
   call mp_bcast (electron_phonon, meta_ionode_id, world_comm )
   !

@@ -5,27 +5,12 @@ AC_DEFUN([X_AC_QE_CC], [
 # candidate C and f77 compilers good for all cases
 try_cc="cc gcc"
 
-case "$arch:$f90_version" in
+case "$arch:$f90_flavor" in
 *:ifort* )
         try_cc="icc ecc $try_cc"
         ;;
 *:pgf90 )
         try_cc="pgcc $try_cc"
-        ;;
-*:pathf95 )
-        try_cc="pathcc $try_cc"
-        ;;
-*:sunf95 )
-        try_cc="suncc $try_cc"
-        ;;
-*:openf95 )
-        try_cc="opencc $try_cc"
-        ;;
-aix:*xlf*_r )
-        try_cc="xlc_r $try_cc"
-        ;;
-aix:*xlf* )
-        try_cc="xlc $try_cc"
         ;;
 cray*:* )
         try_cc="cc"
@@ -60,23 +45,8 @@ try_cpp="cpp"
 
 case "$arch:$cc" in
 *:pgcc )
-        try_cflags="-fast"
-        ;;
-# pathcc -E seems to give problems when preprocessing iotk
-#*:pathcc )
-#       try_cpp="pathcc -E"
-#       ;;
-aix:xlc* | aix:cc )
-        try_cflags="-q64 -O2"
-        c_ldflags="-q64"
-        ;;
-*:suncc  )
-        try_cflags="-fast -O"
-        ;;
-sparc:cc )
-        try_cflags="-fast -dalign -xchip=ultra3 -xarch=v8plusb \
--xlic_lib=sunperf"
-        try_cpp="fpp"
+        # Do I need preprocessing here?
+        try_cflags="-fast -Mpreprocess"
         ;;
 crayxt*:cc )
         # Actually we need something like is done for ftn to detect 

@@ -22,14 +22,13 @@ SUBROUTINE do_cond(done)
   USE spin_orb,   ONLY : lspinorb, domag
   USE uspp,       ONLY : okvan
   USE gvect,      ONLY : ecutrho
-  USE wvfct,      ONLY : ecutwfc
+  USE gvecw,      ONLY : ecutwfc
   USE symm_base,  ONLY: nsym, s, t_rev, time_reversal
   USE cond
-  USE io_files,   ONLY: outdir, tmp_dir, prefix
+  USE io_files,   ONLY: tmp_dir, prefix
   !!! RECOVER
   USE cond_restart
-  USE input_parameters, ONLY: max_seconds
-  USE check_stop, ONLY: check_stop_init, check_stop_now
+  USE check_stop, ONLY: max_seconds, check_stop_init, check_stop_now
   !!!
   USE noncollin_module, ONLY : noncolin, i_cons
   USE io_global, ONLY : stdout, ionode, ionode_id
@@ -43,6 +42,7 @@ SUBROUTINE do_cond(done)
   IMPLICIT NONE
   !
   CHARACTER(LEN=256), EXTERNAL :: trimcheck
+  CHARACTER(LEN=256) :: outdir
   !
   LOGICAL, INTENT(OUT) :: done
   !
@@ -69,7 +69,7 @@ SUBROUTINE do_cond(done)
   !
   ! initialise environment
   !
-#ifdef __MPI
+#if defined(__MPI)
   CALL mp_startup ( )
 #endif
   CALL environment_start ( 'PWCOND' )
@@ -186,7 +186,7 @@ SUBROUTINE do_cond(done)
      !
   END IF
 
-#ifdef __MPI
+#if defined(__MPI)
    IF (npool > 1) CALL errore('pwcond','pools not implemented',npool)
    ik = IAND ( nproc, nproc-1 )
    IF ( nproc /= 1 .AND. ik /= 0 ) &

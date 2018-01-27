@@ -10,7 +10,7 @@
 SUBROUTINE deallocate_modules_var()
   !----------------------------------------------------------------------------
   !
-  USE uspp,       ONLY : beta, dbeta, qq
+  USE uspp,       ONLY : beta, dbeta, qq_nt
   USE core,       ONLY : rhocb
   !
   USE core,                 ONLY : deallocate_core
@@ -28,10 +28,9 @@ SUBROUTINE deallocate_modules_var()
   USE betax,                ONLY : deallocate_betax
   USE wavefunctions_module, ONLY : deallocate_wavefunctions
   USE wannier_module,       ONLY : deallocate_wannier
-  USE fft_types,            ONLY : fft_dlay_descriptor, fft_dlay_deallocate
-  USE fft_types,            ONLY : fft_box_deallocate
+  USE fft_types,            ONLY : fft_type_descriptor, fft_type_deallocate
+  USE fft_smallbox_type,    ONLY : fft_box_deallocate
   USE fft_base,             ONLY : dfftp, dffts, dfftb
-  USE stick_base,           ONLY : sticks_deallocate
   USE electrons_module,     ONLY : deallocate_electrons
   USE ions_base,            ONLY : deallocate_ions_base
   ! USE polarization,         ONLY : deallocate_polarization ! obsolescent
@@ -43,13 +42,14 @@ SUBROUTINE deallocate_modules_var()
   USE kohn_sham_states,     ONLY : ks_states_closeup
   USE ldaU_cp,              ONLY : deallocate_lda_plus_u
   USE step_penalty,         ONLY : deallocate_step_pen
+  USE fft_base,             ONLY : pstickdealloc
 
   !
   IMPLICIT NONE
   !
   !
   IF ( ALLOCATED( beta ) )     DEALLOCATE( beta )
-  IF ( ALLOCATED( qq ) )       DEALLOCATE( qq )
+  IF ( ALLOCATED( qq_nt ) )    DEALLOCATE( qq_nt )
   IF ( ALLOCATED( rhocb ) )    DEALLOCATE( rhocb )
   IF ( ALLOCATED( dbeta ) )    DEALLOCATE( dbeta )
   !
@@ -68,10 +68,10 @@ SUBROUTINE deallocate_modules_var()
   CALL deallocate_qgb_mod()
   CALL deallocate_betax()
   !
-  CALL fft_dlay_deallocate( dfftp )
-  CALL fft_dlay_deallocate( dffts )
+  CALL fft_type_deallocate( dfftp )
+  CALL fft_type_deallocate( dffts )
   CALL fft_box_deallocate( dfftb )
-  CALL sticks_deallocate()
+  CALL pstickdealloc( )
   !
   CALL deallocate_ions_base()
   !

@@ -5,6 +5,12 @@
 ! in the root directory of the present distribution,
 ! or http://www.gnu.org/copyleft/gpl.txt .
 !
+#if defined(__OLDXML)
+!----------------------------------------------------------------------------
+! TB
+! included allocation of the force field of the gate, search for 'TB'
+!----------------------------------------------------------------------------
+!
 !----------------------------------------------------------------------------
 SUBROUTINE read_file()
   !----------------------------------------------------------------------------
@@ -16,7 +22,6 @@ SUBROUTINE read_file()
   USE buffers,              ONLY : open_buffer, close_buffer
   USE wvfct,                ONLY : nbnd, npwx
   USE noncollin_module,     ONLY : npol
-  USE klist,                ONLY : nks
   USE paw_variables,        ONLY : okpaw, ddd_PAW
   USE paw_onecenter,        ONLY : paw_potential
   USE uspp,                 ONLY : becsum
@@ -27,15 +32,28 @@ SUBROUTINE read_file()
   USE ldaU,                 ONLY : lda_plus_u, U_projection
   USE pw_restart,           ONLY : pw_readfile
   USE control_flags,        ONLY : io_level
+  USE klist,                ONLY : init_igk
+  USE gvect,                ONLY : ngm, g
+  USE gvecw,                ONLY : gcutw
+#if defined (__HDF5)
+  USE hdf5_qe
+#endif
   !
   IMPLICIT NONE 
   INTEGER :: ierr
   LOGICAL :: exst
+  CHARACTER( 256 )  :: dirname
+  !
+  !
+  ierr = 0 
   !
   ! ... Read the contents of the xml data file
   !
   IF ( ionode ) WRITE( stdout, '(/,5x,A,/,5x,A)') &
      'Reading data from directory:', TRIM( tmp_dir ) // TRIM( prefix ) // '.save'
+#if defined(__HDF5)
+  CALL initialize_hdf5()
+#endif
   !
   CALL read_xml_file ( )
   !
@@ -48,7 +66,10 @@ SUBROUTINE read_file()
   io_level = 1
   CALL open_buffer ( iunwfc, 'wfc', nwordwfc, io_level, exst )
   !
-  ! ... Read orbitals, write them in 'distributed' form to iunwfc
+  ! ... Allocate and compute k+G indices and number of plane waves
+  ! ... FIXME: should be read from file, not re-computed
+  !
+  CALL init_igk ( npwx, ngm, g, gcutw ) 
   !
   CALL pw_readfile( 'wave', ierr )
   !
@@ -100,17 +121,17 @@ SUBROUTINE read_xml_file_internal(withbs)
   USE force_mod,            ONLY : force
   USE klist,                ONLY : nkstot, nks, xk, wk
   USE lsda_mod,             ONLY : lsda, nspin, current_spin, isk
-  USE wvfct,                ONLY : nbnd, nbndx, et, wg, ecutwfc
-  USE symm_base,            ONLY : irt, d1, d2, d3, checkallsym
-  USE ktetra,               ONLY : tetra, ntetra 
-  USE extfield,             ONLY : forcefield, tefield
+  USE wvfct,                ONLY : nbnd, nbndx, et, wg
+  USE symm_base,            ONLY : irt, d1, d2, d3, checkallsym, nsym
+  USE extfield,             ONLY : forcefield, tefield, gate, forcegate
   USE cellmd,               ONLY : cell_factor, lmovecell
   USE fft_base,             ONLY : dfftp
   USE fft_interfaces,       ONLY : fwfft
-  USE grid_subroutines,     ONLY : realspace_grid_init
+  USE fft_types,            ONLY : fft_type_allocate
   USE recvec_subs,          ONLY : ggen
   USE gvect,                ONLY : gg, ngm, g, gcutm, &
                                    eigts1, eigts2, eigts3, nl, gstart
+  USE Coul_cut_2D,          ONLY : do_cutoff_2D, cutoff_fact
   USE fft_base,             ONLY : dfftp, dffts
   USE gvecs,                ONLY : ngms, nls, gcutms 
   USE spin_orb,             ONLY : lspinorb, domag
@@ -119,9 +140,9 @@ SUBROUTINE read_xml_file_internal(withbs)
   USE vlocal,               ONLY : strf
   USE io_files,             ONLY : tmp_dir, prefix, iunpun, nwordwfc, iunwfc
   USE noncollin_module,     ONLY : noncolin, npol, nspin_lsda, nspin_mag, nspin_gga
-  USE pw_restart,           ONLY : pw_readfile
+  USE pw_restart,           ONLY : pw_readfile, pp_check_file
+  USE io_rho_xml,           ONLY : read_scf
   USE read_pseudo_mod,      ONLY : readpp
-  USE xml_io_base,          ONLY : pp_check_file
   USE uspp,                 ONLY : becsum
   USE uspp_param,           ONLY : upf
   USE paw_variables,        ONLY : okpaw, ddd_PAW
@@ -131,6 +152,7 @@ SUBROUTINE read_xml_file_internal(withbs)
   USE funct,                ONLY : get_inlc, get_dft_name
   USE kernel_table,         ONLY : initialize_kernel_table
   USE esm,                  ONLY : do_comp_esm, esm_init
+  USE mp_bands,             ONLY : intra_bgrp_comm, nyfft
   !
   IMPLICIT NONE
 
@@ -145,9 +167,9 @@ SUBROUTINE read_xml_file_internal(withbs)
   REAL(DP) :: sr(3,3,48)
   CHARACTER(LEN=20) dft_name
   !
+  !
   ! ... first we get the version of the qexml file
   !     if not already read
-  !
   CALL pw_readfile( 'header', ierr )
   CALL errore( 'read_xml_file ', 'unable to determine qexml version', ABS(ierr) )
   !
@@ -157,20 +179,16 @@ SUBROUTINE read_xml_file_internal(withbs)
                & 'file ' // TRIM( tmp_dir ) // TRIM( prefix ) &
                & // '.save not guaranteed to be safe for post-processing' )
   !
-  ! ... a reset of the internal flags is necessary because some codes call
-  ! ... read_xml_file() more than once
-  !
-  CALL pw_readfile( 'reset', ierr )
-  !
   ! ... here we read the variables that dimension the system
   ! ... in parallel execution, only root proc reads the file
   ! ... and then broadcasts the values to all other procs
   !
+  CALL pw_readfile( 'reset', ierr )
   CALL pw_readfile( 'dim',   ierr )
   CALL errore( 'read_xml_file ', 'problem reading file ' // &
              & TRIM( tmp_dir ) // TRIM( prefix ) // '.save', ierr )
   !
-  ! ... allocate space for atomic positions, symmetries, forces, tetrahedra
+  ! ... allocate space for atomic positions, symmetries, forces
   !
   IF ( nat < 0 ) CALL errore( 'read_xml_file', 'wrong number of atoms', 1 )
   !
@@ -183,13 +201,13 @@ SUBROUTINE read_xml_file_internal(withbs)
   ALLOCATE( extfor(  3, nat ) )
   !
   IF ( tefield ) ALLOCATE( forcefield( 3, nat ) )
+  IF ( gate ) ALLOCATE( forcegate( 3, nat ) ) ! TB
   !
   ALLOCATE( irt( 48, nat ) )
-  ALLOCATE( tetra( 4, MAX( ntetra, 1 ) ) )
   !
   CALL set_dimensions()
-  CALL realspace_grid_init ( dfftp, at, bg, gcutm )
-  CALL realspace_grid_init ( dffts, at, bg, gcutms)
+  CALL fft_type_allocate ( dfftp, at, bg, gcutm, intra_bgrp_comm, nyfft=nyfft )
+  CALL fft_type_allocate ( dffts, at, bg, gcutms, intra_bgrp_comm, nyfft=nyfft )
   !
   ! ... check whether LSDA
   !
@@ -221,24 +239,24 @@ SUBROUTINE read_xml_file_internal(withbs)
   !
   ! ... here we read all the variables defining the system
   !
-  if (withbs .eqv. .true.) then
+  IF  ( withbs .EQV. .TRUE. ) THEN  
      CALL pw_readfile( 'nowave', ierr )
-  else 
+  ELSE
      CALL pw_readfile( 'nowavenobs', ierr )
-  end if
+  END IF
   !
   ! ... distribute across pools k-points and related variables.
   ! ... nks is defined by the following routine as the number 
   ! ... of k-points in the current pool
   !
-  CALL divide_et_impera( xk, wk, isk, lsda, nkstot, nks )
+  CALL divide_et_impera( nkstot, xk, wk, isk, nks )
   !
   CALL poolscatter( nbnd, nkstot, et, nks, et )
   CALL poolscatter( nbnd, nkstot, wg, nks, wg )
   !
   ! ... check on symmetry
   !
-  IF (nat > 0) CALL checkallsym( nat, tau, ityp, dfftp%nr1, dfftp%nr2, dfftp%nr3 )
+  IF (nat > 0) CALL checkallsym( nat, tau, ityp )
   !
   !  Set the different spin indices
   !
@@ -258,6 +276,7 @@ SUBROUTINE read_xml_file_internal(withbs)
   ! ... read pseudopotentials
   !
   CALL pw_readfile( 'pseudo', ierr )
+
   dft_name = get_dft_name () ! already set, should not be set again
   CALL readpp ( dft_name )
   !
@@ -275,6 +294,7 @@ SUBROUTINE read_xml_file_internal(withbs)
   ! ... allocate memory for G- and R-space fft arrays
   !
   CALL pre_init()
+  CALL data_structure ( gamma_only )
   CALL allocate_fft()
   CALL ggen ( gamma_only, at, bg ) 
   IF (do_comp_esm) THEN
@@ -301,11 +321,14 @@ SUBROUTINE read_xml_file_internal(withbs)
   !
   ! ... read the charge density
   !
-  CALL pw_readfile( 'rho', ierr )
+  CALL read_scf( rho, nspin )
   !
   ! ... re-calculate the local part of the pseudopotential vltot
   ! ... and the core correction charge (if any) - This is done here
   ! ... for compatibility with the previous version of read_file
+  !
+  ! 2D calculations: re-initialize cutoff fact before calculating potentials
+  IF(do_cutoff_2D) CALL cutoff_fact()
   !
   CALL init_vloc()
   CALL struc_fact( nat, tau, nsp, ityp, ngm, g, bg, dfftp%nr1, dfftp%nr2, &
@@ -332,6 +355,7 @@ SUBROUTINE read_xml_file_internal(withbs)
   CALL v_of_rho( rho, rho_core, rhog_core, &
                  ehart, etxc, vtxc, eth, etotefield, charge, v )
   !
+  !
   RETURN
   !
   CONTAINS
@@ -343,8 +367,8 @@ SUBROUTINE read_xml_file_internal(withbs)
       USE constants, ONLY : pi
       USE cell_base, ONLY : alat, tpiba, tpiba2
       USE gvect,     ONLY : ecutrho, gcutm
-      USE wvfct,     ONLY : ecutwfc
       USE gvecs,     ONLY : gcutms, dual, doublegrid
+      USE gvecw,     ONLY : gcutw, ecutwfc
       !
       !
       ! ... Set the units in real and reciprocal space
@@ -354,6 +378,7 @@ SUBROUTINE read_xml_file_internal(withbs)
       !
       ! ... Compute the cut-off of the G vectors
       !
+      gcutw =        ecutwfc / tpiba2
       gcutm = dual * ecutwfc / tpiba2
       ecutrho=dual * ecutwfc
       !
@@ -367,3 +392,7 @@ SUBROUTINE read_xml_file_internal(withbs)
     END SUBROUTINE set_dimensions
     !
   END SUBROUTINE read_xml_file_internal
+#else
+SUBROUTINE read_file_dummy()
+END SUBROUTINE read_file_dummy
+#endif

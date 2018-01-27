@@ -1,5 +1,5 @@
 !
-! Copyright (C) 2001-2012 Quantum ESPRESSO group
+! Copyright (C) 2001-2016 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -32,9 +32,9 @@ SUBROUTINE potinit()
   USE lsda_mod,             ONLY : lsda, nspin
   USE fft_base,             ONLY : dfftp
   USE fft_interfaces,       ONLY : fwfft
-  USE gvect,                ONLY : ngm, gstart, nl, g, gg
+  USE gvect,                ONLY : ngm, gstart, nl, g, gg, ig_l2g
   USE gvecs,                ONLY : doublegrid
-  USE control_flags,        ONLY : lscf
+  USE control_flags,        ONLY : lscf, gamma_only
   USE scf,                  ONLY : rho, rho_core, rhog_core, &
                                    vltot, v, vrs, kedtau
   USE funct,                ONLY : dft_is_meta
@@ -44,13 +44,18 @@ SUBROUTINE potinit()
                                    niter_with_fixed_ns
   USE noncollin_module,     ONLY : noncolin, report
   USE io_files,             ONLY : tmp_dir, prefix, input_drho
-  USE spin_orb,             ONLY : domag
+  USE spin_orb,             ONLY : domag, lforcet
   USE mp,                   ONLY : mp_sum
-  USE mp_bands ,            ONLY : intra_bgrp_comm
+  USE mp_bands ,            ONLY : intra_bgrp_comm, root_bgrp
   USE io_global,            ONLY : ionode, ionode_id
-  USE pw_restart,           ONLY : pw_readfile
-  USE io_rho_xml,           ONLY : read_rho
+  USE io_rho_xml,           ONLY : read_scf
   USE xml_io_base,          ONLY : check_file_exst
+#if defined __OLDXML
+  USE xml_io_base,          ONLY : read_rho
+#else
+  USE io_base,              ONLY : read_rhog
+  USE fft_rho,              ONLY : rho_g2r
+#endif
   !
   USE uspp,                 ONLY : becsum
   USE paw_variables,        ONLY : okpaw, ddd_PAW
@@ -62,40 +67,46 @@ SUBROUTINE potinit()
   REAL(DP)              :: charge           ! the starting charge
   REAL(DP)              :: etotefield       !
   REAL(DP)              :: fact
-  INTEGER               :: is, ios
+  INTEGER               :: is
   LOGICAL               :: exst 
-  CHARACTER(LEN=256)    :: filename
+  CHARACTER(LEN=256)    :: dirname, filename
   !
   CALL start_clock('potinit')
   !
-  ! check for both .dat and .xml extensions (compatibility reasons) 
-  !
-  filename =  TRIM( tmp_dir ) // TRIM( prefix ) // '.save/charge-density.dat'
+  dirname = TRIM(tmp_dir) // TRIM (prefix) // '.save/'
+#if defined __HDF5
+  filename = TRIM(dirname) // 'charge-density.hdf5'
+#else 
+  filename = TRIM(dirname) // 'charge-density.dat'
+#endif
   exst     =  check_file_exst( TRIM(filename) )
-  !
-  IF ( .NOT. exst ) THEN
-      !
-      filename =  TRIM( tmp_dir ) // TRIM( prefix ) // '.save/charge-density.xml'
-      exst     =  check_file_exst( TRIM(filename) )
-      !
-  ENDIF
-  !
   !
   IF ( starting_pot == 'file' .AND. exst ) THEN
      !
      ! ... Cases a) and b): the charge density is read from file
      ! ... this also reads rho%ns if lda+U and rho%bec if PAW
      !
-     CALL pw_readfile( 'rho', ios )
+     IF ( .NOT.lforcet ) THEN
+        CALL read_scf ( rho, nspin, gamma_only )
+#if !defined (__OLDXML)
+        CALL rho_g2r ( rho%of_g, rho%of_r )
+#endif
+     ELSE
+        !
+        ! ... 'force theorem' calculation of MAE: read rho only from previous
+        ! ... lsda calculation, set noncolinear magnetization from angles
+        !
+#if defined (__OLDXML)
+        CALL read_rho ( dirname, rho%of_r, 2 )
+#else
+        CALL read_rhog ( dirname, root_bgrp, intra_bgrp_comm, &
+             ig_l2g, nspin, rho%of_g, gamma_only )
+        CALL rho_g2r ( rho%of_g, rho%of_r )
+#endif
+        CALL nc_magnetization_from_lsda ( dfftp%nnr, nspin, rho%of_r )
+     END IF
      !
-     IF ( ios /= 0 ) THEN
-        !
-        WRITE( stdout, '(/5X,"Error reading from file :"/5X,A,/)' ) &
-            TRIM( filename )
-        !
-        CALL errore ( 'potinit' , 'reading starting density', ios)
-        !
-     ELSE IF ( lscf ) THEN
+     IF ( lscf ) THEN
         !
         WRITE( stdout, '(/5X, &
              & "The initial density is read from file :"/5X,A,/)' ) &
@@ -126,9 +137,9 @@ SUBROUTINE potinit()
      IF (lda_plus_u) THEN
         !
         IF (noncolin) THEN
-          CALL init_ns_nc()
+           CALL init_ns_nc()
         ELSE
-          CALL init_ns()
+           CALL init_ns()
         ENDIF
         !
      ENDIF
@@ -141,7 +152,13 @@ SUBROUTINE potinit()
         IF ( nspin > 1 ) CALL errore &
              ( 'potinit', 'spin polarization not allowed in drho', 1 )
         !
-        CALL read_rho ( v%of_r, 1, input_drho )
+#if defined (__OLDXML)
+        CALL read_rho ( dirname, v%of_r, 1, input_drho )
+#else
+        CALL read_rhog ( dirname, root_bgrp, intra_bgrp_comm, &
+             ig_l2g, nspin, v%of_g, gamma_only )
+        CALL rho_g2r ( v%of_g, v%of_r )
+#endif
         !
         WRITE( UNIT = stdout, &
                FMT = '(/5X,"a scf correction to at. rho is read from",A)' ) &
@@ -209,7 +226,7 @@ SUBROUTINE potinit()
      !
      !!! fact = 0.0_dp
      DO is = 1, nspin
-        rho%kin_r(:,is) = fact * abs(rho%of_r(:,is)*nspin)**(5.0/3.0)/nspin
+        if (starting_pot /= 'file') rho%kin_r(:,is) = fact * abs(rho%of_r(:,is)*nspin)**(5.0/3.0)/nspin
         psic(:) = rho%kin_r(:,is)
         CALL fwfft ('Dense', psic, dfftp)
         rho%kin_g(:,is) = psic(nl(:))
@@ -255,3 +272,46 @@ SUBROUTINE potinit()
   RETURN
   !
 END SUBROUTINE potinit
+!
+!-------------
+SUBROUTINE nc_magnetization_from_lsda ( nnr, nspin, rho )
+  !-------------
+  !
+  USE kinds,     ONLY: dp
+  USE constants, ONLY: pi
+  USE io_global, ONLY: stdout
+  USE noncollin_module, ONLY: angle1, angle2
+  !
+  IMPLICIT NONE
+  INTEGER, INTENT (in):: nnr, nspin
+  REAL(dp), INTENT (inout):: rho(nnr,nspin)
+  !---  
+  !  set up noncollinear m_x,y,z from collinear m_z (AlexS) 
+  !
+  WRITE(stdout,*)
+  WRITE(stdout,*) '-----------'
+  WRITE(stdout,'("Spin angles Theta, Phi (degree) = ",2f8.4)') &
+       angle1(1)/PI*180.d0, angle2(1)/PI*180.d0 
+  WRITE(stdout,*) '-----------'
+  !
+#ifdef __OLDXML
+  ! On input, rho(1)=rho_up, rho(2)=rho_down
+  ! Set rho(1)=rho_tot, rho(3)=rho_up-rho_down=magnetization
+  ! 
+  rho(:,3) = rho(:,1)-rho(:,2)
+  rho(:,1) = rho(:,1)+rho(:,2)
+#endif
+  !
+  ! now set rho(2)=magn*sin(theta)*cos(phi)   x
+  !         rho(3)=magn*sin(theta)*sin(phi)   y
+  !         rho(4)=magn*cos(theta)            z
+  !
+  rho(:,4) = rho(:,3)*cos(angle1(1))
+  rho(:,2) = rho(:,3)*sin(angle1(1))
+  rho(:,3) = rho(:,2)*sin(angle2(1))
+  rho(:,2) = rho(:,2)*cos(angle2(1))
+  !
+  RETURN
+  !
+END SUBROUTINE nc_magnetization_from_lsda
+

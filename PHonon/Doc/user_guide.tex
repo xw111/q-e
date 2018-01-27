@@ -1,5 +1,5 @@
 \documentclass[12pt,a4paper]{article}
-\def\version{5.3}
+\def\version{6.2.1}
 \def\qe{{\sc Quantum ESPRESSO}}
 
 \usepackage{html}
@@ -30,6 +30,7 @@
   \includegraphics[width=5cm]{\qeImage} \\
   % title
   \Huge \PHonon\ User's Guide (v. \version)
+  \\ \Large (only partially updated)
 }
 
 \maketitle
@@ -43,6 +44,9 @@ part of the \qe\ distribution.
 Further documentation, beyond what is provided 
 in this guide, can be found in the directory
 \texttt{PHonon/Doc/}, containing a copy of this guide.
+
+{\em Important notice: due to the lack of time and of manpower, this
+manual is only partially updated and may contain outdated information.}
 
 This guide assumes that you know the contents of 
 the general User's Guide for \qe\ and of the User's 
@@ -71,9 +75,14 @@ of the main \qe\ tree:
 \texttt{PH/}      & : source files for phonon calculations 
                    and analysis\\
 \texttt{Gamma/}  & : source files for Gamma-only phonon calculation\\
-\texttt{D3/}     & : source files for third-order derivative
-                  calculations \\
 \end{tabular}\\
+{\em Important Notice:} since v.5.4, many modules and routines that were
+common to all linear-response \qe\ codes are moved into the new 
+\texttt{LR\_Modules} subdirectory of the main tree. Since v.6.0, the
+\texttt{D3} code for anharmonic force constant calculations has been 
+superseded by the \texttt{D3Q} coda, available on 
+\texttt{http://www.qe-forge.org/gf/project/d3q/}.
+
 The codes available in the \PHonon\ package can perform the following 
 types of calculations:
 \begin{itemize}
@@ -82,13 +91,15 @@ types of calculations:
   \item effective charges and dielectric tensors;
   \item electron-phonon interaction coefficients for metals;
   \item interatomic force constants in real space;
-  \item third-order anharmonic phonon lifetimes;
   \item Infrared and Raman (nonresonant) cross section.
 \end{itemize}
 
 Phonons can be plotted using the \texttt{PlotPhon} package.
 Calculations of the vibrational free energy in the Quasi-Harmonic 
 approximations can be performed using the \texttt{QHA}  package.
+{\em Note:} since v.5.4, these two packages are separately distributed
+and no longer bundled with \PHonon. Their latest version can be 
+found in the tarballs of \PHonon\ v.5.3.
 
 \section{People}
 The \PHonon\ package
@@ -100,7 +111,11 @@ We quote in particular:
   \item Michele Lazzeri (Univ.Paris VI) for the 2n+1 code and Raman 
   cross section calculation with 2nd-order response;
  \item Andrea Dal Corso for the implementation of Ultrasoft, PAW,
-  noncolinear, spin-orbit extensions to \PHonon.
+  noncolinear, spin-orbit extensions to \PHonon;
+  \item Mitsuaki Kawamura (U.Tokyo) for implementation of the optimized
+  tetrahedron method in phonon and electron-phonon calculations;
+  \item Thibault Sohier, Matteo Calandra, Francesco Mauri, for 
+	phonons in two-dimensional systems.
 \end{itemize}
 
 The \texttt{PlotPhon} and \texttt{QHA} packages were contribute by the
@@ -108,20 +123,13 @@ late Prof. Eyvaz Isaev.
 
 Other contributors include: Lorenzo Paulatto (Univ. Paris VI) for
 PAW, 2n+1 code; William Parker (Argonne) for phonon terms in dielectric
-tensor.
+tensor; Tobias Wassmann (Univ. Paris VI) for third-order derivatives of GGA 
+potential. Weicheng Bao (Nanjing University) and Norge Cruz Hernandez
+(Universidad de Sevilla) helped debugging the phonon code.
 
-We shall greatly appreciate if scientific work done using this code will 
-contain an explicit acknowledgment and the following reference:
-\begin{quote}
-P. Giannozzi, S. Baroni, N. Bonini, M. Calandra, R. Car, C. Cavazzoni,
-D. Ceresoli, G. L. Chiarotti, M. Cococcioni, I. Dabo, A. Dal Corso,
-S. Fabris, G. Fratesi, S. de Gironcoli, R. Gebauer, U. Gerstmann,
-C. Gougoussis, A. Kokalj, M. Lazzeri, L. Martin-Samos, N. Marzari,
-F. Mauri, R. Mazzarello, S. Paolini, A. Pasquarello, L. Paulatto,
-C. Sbraccia, S. Scandolo, G. Sclauzero, A. P. Seitsonen, A. Smogunov,
-P. Umari, R. M. Wentzcovitch, J.Phys.:Condens.Matter {\bf 21}, 395502 (2009),
-http://arxiv.org/abs/0906.2569
-\end{quote}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\input ../../Doc/quote.tex
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 \section{Installation}
 
@@ -153,12 +161,12 @@ from the \PHonon\ directory, produces the following codes:
     the electron-phonon coefficient $\lambda$, the function $\alpha^2F(\omega)$
 \item \texttt{PH/lambda.x}: also calculates $\lambda$ and $\alpha^2F(\omega)$,
    plus $T_c$ for  superconductivity using the McMillan formula
+\item \texttt{PH/alpha2f.x}: also calculates $\lambda$ and $\alpha^2F(\omega)$.
+  It is used together with the optimized tetrahedron method
+  (\verb|occupations="tetrahedra_opt"| in \pwx) and shifted {\it q}-grid
+  (\verb|lshiftq=.true.| in \phx).
 \item \texttt{PH/fqha.x}: a simple code to calculate vibrational entropy with
    the quasi-harmonic approximation
-\item \texttt{D3/d3.x}:
-  calculates anharmonic phonon lifetimes (third-order derivatives
-  of the energy), using data produced by \pwx\ and \phx\ (USPP 
-  and PAW not supported). 
 \item \texttt{Gamma/phcg.x}: 
   a version of \phx\ that calculates phonons at ${\bf q} = 0$ using
   conjugate-gradient minimization of the density functional expanded to
@@ -180,8 +188,7 @@ while ${\bf k}$ will indicate Bloch vectors used for summing over the
 Brillouin Zone.
 
 The main code \phx\ can be used whenever \PWscf\ can be used, 
-with the exceptions of: DFT+U, semiempirical VdW corrections,
-nonlocal vdW and hybrid functionals, external electric fields,
+with the exceptions of DFT+U, hybrid functionals, external electric fields,
 constraints on magnetization, nonperiodic boundary conditions.
 USPP and PAW are not implemented for higher-order response calculations.
 See the header of file \texttt{PHonon/PH/phonon.f90} for a complete and
@@ -307,6 +314,60 @@ See the appendix for the relevant formulae.
 {\bf Important notice}: the $q\rightarrow 0$ limit of the contribution 
 to the electron-phonon coefficient diverges for optical modes! please 
 be very careful, consult the relevant literature. . 
+
+\subsection{DFPT with the tetrahedron method}
+
+In order to use the tetrahedron method for phonon calculations,
+you should run \pwx\ and \phx\ as follows:
+\begin{enumerate}
+  \item Run \pwx\ with \verb|occupation = "tetrahedra_opt"| and \verb|K_POINT automatic|.
+  \item Run \phx.
+\end{enumerate}
+
+There is an example in \verb|PHonon/example/tetra_example/|.
+
+\subsection{Calculation of electron-phonon interaction coefficients with the tetrahedron method}
+
+When you perform a calculation of electron-phonon interaction coefficients 
+with the tetrahedron method,
+you have to use an offset $q$-point grid in order to avoid a singularity 
+at $q=\Gamma$; you can perform this calculation as follows:
+
+\begin{enumerate}
+  \item Run \pwx\ with \verb|occupation = "tetrahedra_opt"| and \verb|K_POINT automatic|.
+  \item Run \phx\ with \verb|lshift_q = .true.| and \verb|electron_phonon = ""| (or unset it)
+    to generate the dynamical matrix and
+    the deformation potential (in \verb|_ph*/{prefix}_q*/|) of each $q$.
+  \item Run \phx\ with \verb|electron_phonon = "lambda_tetra"|.
+    You should use a denser $k$ grid by setting \verb|nk1|, \verb|nk2|, and \verb|nk3|.
+    Then \verb|lambda*.dat| are generated; they contain $\lambda_{q \nu}$.
+  \item Run \verb|alpha2f.x| with an input file as follows:
+\begin{verbatim}
+&INPUTPH
+! The same as that for the electron-phonon calculation with ph.x
+ :
+/
+&INPUTA2F
+  nfreq = Number of frequency-points for a2F(omega), 
+/
+\end{verbatim}
+Then $\lambda$, and $\omega_{\ln}$ are computed and they are printed to the standard output.
+$\alpha^2F(\omega)$ and (partial) phonon-DOS are also computed;
+they are printed to a file \textit{prefix}\verb|.a2F.dat|.
+\end{enumerate}
+
+There is an example in \verb|PHonon/example/tetra_example/|.
+
+\subsection{Phonons for two-dimensional crystals}
+
+The extension of DFPT to two dimensional crystals,
+in particular gated two-dimensional heterostructure,
+s described in the following paper:
+
+T. Sohier, M. Calandra, and F. Mauri, Phys. Rev. B 96, 075448 (2017),
+https://doi.org/10.1103/PhysRevB.96.075448
+
+See example  \verb|PHonon/example/example17/|.
 
 \section{Parallelism}
 \label{Sec:para}

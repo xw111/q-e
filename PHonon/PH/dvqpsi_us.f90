@@ -1,5 +1,5 @@
 !
-! Copyright (C) 2001-2007 Quantum ESPRESSO group
+! Copyright (C) 2001-2016 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -20,28 +20,34 @@ subroutine dvqpsi_us (ik, uact, addnlcc)
   !
   !
   USE kinds, only : DP
+  USE funct,     ONLY : dft_is_gradient, dft_is_nonlocc
   USE ions_base, ONLY : nat, ityp
-  USE cell_base, ONLY : tpiba
-  USE fft_base,   ONLY: dfftp, dffts
+  USE cell_base, ONLY : tpiba, alat
+  USE fft_base,  ONLY : dfftp, dffts
   USE fft_interfaces, ONLY: fwfft, invfft
   USE gvect,     ONLY : eigts1, eigts2, eigts3, mill, g, nl, &
                         ngm
-  USE gvecs,   ONLY : ngms, doublegrid, nls
+  USE gvecs,     ONLY : ngms, doublegrid, nls
   USE lsda_mod,  ONLY : lsda, isk
-  USE noncollin_module, ONLY : npol
+  USE scf,       ONLY : rho, rho_core
+  USE noncollin_module, ONLY : nspin_lsda, nspin_gga, nspin_mag, npol
   use uspp_param,ONLY : upf
-  USE wvfct,     ONLY : nbnd, npw, npwx, igk
+  USE wvfct,     ONLY : nbnd, npwx
   USE wavefunctions_module,  ONLY: evc
-  USE nlcc_ph,    ONLY : nlcc_any, drc
+  USE nlcc_ph,    ONLY : drc
+  USE uspp,       ONLY : nlcc_any
   USE eqv,        ONLY : dvpsi, dmuxc, vlocq
-  USE qpoint,     ONLY : npwq, igkq, xq, eigqts, ikks
+  USE qpoint,     ONLY : xq, eigqts, ikqs, ikks
+  USE klist,      ONLY : ngk, igk_k
+  USE gc_lr,      ONLY: grho, dvxc_rr,  dvxc_sr,  dvxc_ss, dvxc_s
 
+  USE Coul_cut_2D, ONLY: do_cutoff_2D  
+  USE Coul_cut_2D_ph, ONLY : cutoff_localq
   implicit none
   !
   !   The dummy variables
   !
-
-  integer :: ik
+  integer, intent(in) :: ik
   ! input: the k point
   complex(DP) :: uact (3 * nat)
   ! input: the pattern of displacements
@@ -50,7 +56,7 @@ subroutine dvqpsi_us (ik, uact, addnlcc)
   !   And the local variables
   !
 
-  integer :: na, mu, ikk, ig, nt, ibnd, ir, is, ip
+  integer :: npw, npwq, na, mu, ikq, ikk, iks, ig, nt, ibnd, ir, is, ip
   ! counter on atoms
   ! counter on modes
   ! the point k
@@ -63,19 +69,14 @@ subroutine dvqpsi_us (ik, uact, addnlcc)
   complex(DP) , allocatable, target :: aux (:)
   complex(DP) , allocatable :: aux1 (:), aux2 (:)
   complex(DP) , pointer :: auxs (:)
-  ! work space
-  logical :: htg
+  REAL(DP) :: fac
+  COMPLEX(DP), ALLOCATABLE :: drhoc(:)
 
   call start_clock ('dvqpsi_us')
-  htg = dffts%have_task_groups
-  dffts%have_task_groups=.FALSE.
   if (nlcc_any.and.addnlcc) then
+     allocate (drhoc( dfftp%nnr))
      allocate (aux( dfftp%nnr))
-     if (doublegrid) then
-        allocate (auxs(dffts%nnr))
-     else
-        auxs => aux
-     endif
+     allocate (auxs(dffts%nnr))
   endif
   allocate (aux1(dffts%nnr))
   allocate (aux2(dffts%nnr))
@@ -85,7 +86,6 @@ subroutine dvqpsi_us (ik, uact, addnlcc)
   !    reciprocal space while the product with the wavefunction is done in
   !    real space
   !
-  ikk = ikks(ik)
   dvpsi(:,:) = (0.d0, 0.d0)
   aux1(:) = (0.d0, 0.d0)
   do na = 1, nat
@@ -105,13 +105,17 @@ subroutine dvqpsi_us (ik, uact, addnlcc)
            aux1 (nls (ig) ) = aux1 (nls (ig) ) + vlocq (ig, nt) * gu * &
                 fact * gtau
         enddo
+        IF (do_cutoff_2D) then  
+           call cutoff_localq( aux1, fact, u1, u2, u3, gu0, nt, na) 
+        ENDIF
+        !
      endif
   enddo
   !
   ! add NLCC when present
   !
    if (nlcc_any.and.addnlcc) then
-      aux(:) = (0.d0, 0.d0)
+      drhoc(:) = (0.d0, 0.d0)
       do na = 1,nat
          fact = tpiba*(0.d0,-1.d0)*eigqts(na)
          mu = 3*(na-1)
@@ -128,46 +132,70 @@ subroutine dvqpsi_us (ik, uact, addnlcc)
                          eigts2(mill(2,ig),na)*   &
                          eigts3(mill(3,ig),na)
                   gu = gu0+g(1,ig)*u1+g(2,ig)*u2+g(3,ig)*u3
-                  aux(nl(ig))=aux(nl(ig))+drc(ig,nt)*gu*fact*gtau
+                  drhoc(nl(ig))=drhoc(nl(ig))+drc(ig,nt)*gu*fact*gtau
                enddo
             endif
          endif
       enddo
-      CALL invfft ('Dense', aux, dfftp)
+      CALL invfft ('Dense', drhoc, dfftp)
       if (.not.lsda) then
          do ir=1,dfftp%nnr
-            aux(ir) = aux(ir) * dmuxc(ir,1,1)
+            aux(ir) = drhoc(ir) * dmuxc(ir,1,1)
          end do
       else
          is=isk(ikk)
          do ir=1,dfftp%nnr
-            aux(ir) = aux(ir) * 0.5d0 *  &
+            aux(ir) = drhoc(ir) * 0.5d0 *  &
                  (dmuxc(ir,is,1)+dmuxc(ir,is,2))
          enddo
       endif
+
+      fac = 1.d0 / DBLE (nspin_lsda)
+      DO is = 1, nspin_lsda
+         rho%of_r(:,is) = rho%of_r(:,is) + fac * rho_core
+      END DO
+
+      IF ( dft_is_gradient() ) &
+         CALL dgradcorr (rho%of_r, grho, &
+               dvxc_rr, dvxc_sr, dvxc_ss, dvxc_s, xq, drhoc,&
+               dfftp%nnr, 1, nspin_gga, nl, ngm, g, alat, aux)
+
+      IF (dft_is_nonlocc()) &
+         CALL dnonloccorr(rho%of_r, drhoc, xq, aux)
+
+      DO is = 1, nspin_lsda
+         rho%of_r(:,is) = rho%of_r(:,is) - fac * rho_core
+      END DO
+
       CALL fwfft ('Dense', aux, dfftp)
-      if (doublegrid) then
-         auxs(:) = (0.d0, 0.d0)
-         do ig=1,ngms
-            auxs(nls(ig)) = aux(nl(ig))
-         enddo
-      endif
+! 
+!   This is needed also when the smooth and the thick grids coincide to
+!   cut the potential at the cut-off
+!
+      auxs(:) = (0.d0, 0.d0)
+      do ig=1,ngms
+         auxs(nls(ig)) = aux(nl(ig))
+      enddo
       aux1(:) = aux1(:) + auxs(:)
    endif
   !
   ! Now we compute dV_loc/dtau in real space
   !
+  ikk = ikks(ik)
+  ikq = ikqs(ik)
+  npw = ngk(ikk)
+  npwq= ngk(ikq)
   CALL invfft ('Smooth', aux1, dffts)
   do ibnd = 1, nbnd
      do ip=1,npol
         aux2(:) = (0.d0, 0.d0)
         if (ip==1) then
            do ig = 1, npw
-              aux2 (nls (igk (ig) ) ) = evc (ig, ibnd)
+              aux2 (nls (igk_k (ig,ikk) ) ) = evc (ig, ibnd)
            enddo
         else
            do ig = 1, npw
-              aux2 (nls (igk (ig) ) ) = evc (ig+npwx, ibnd)
+              aux2 (nls (igk_k (ig,ikk) ) ) = evc (ig+npwx, ibnd)
            enddo
         end if
         !
@@ -183,11 +211,11 @@ subroutine dvqpsi_us (ik, uact, addnlcc)
         CALL fwfft ('Wave', aux2, dffts)
         if (ip==1) then
            do ig = 1, npwq
-              dvpsi (ig, ibnd) = aux2 (nls (igkq (ig) ) )
+              dvpsi (ig, ibnd) = aux2 (nls (igk_k (ig,ikq) ) )
            enddo
         else
            do ig = 1, npwq
-              dvpsi (ig+npwx, ibnd) = aux2 (nls (igkq (ig) ) )
+              dvpsi (ig+npwx, ibnd) = aux2 (nls (igk_k (ig,ikq) ) )
            enddo
         end if
      enddo
@@ -196,8 +224,9 @@ subroutine dvqpsi_us (ik, uact, addnlcc)
   deallocate (aux2)
   deallocate (aux1)
   if (nlcc_any.and.addnlcc) then
+     deallocate (drhoc)
      deallocate (aux)
-     if (doublegrid) deallocate (auxs)
+     deallocate (auxs)
   endif
   !
   !   We add the contribution of the nonlocal potential in the US form
@@ -206,7 +235,6 @@ subroutine dvqpsi_us (ik, uact, addnlcc)
   !
   call dvqpsi_us_only (ik, uact)
 
-  dffts%have_task_groups=htg
   call stop_clock ('dvqpsi_us')
   return
 end subroutine dvqpsi_us

@@ -6,8 +6,9 @@
 # of the License. See the file `License' in the root directory
 # of the present distribution.
 
-AC_INIT(ESPRESSO, 5.3.0, , espresso)
+AC_INIT(ESPRESSO, 6.1, , espresso)
 
+# Do not use Autoconf 2.69 
 AC_PREREQ(2.60)
 AC_CONFIG_MACRO_DIR([m4/])
 
@@ -25,10 +26,15 @@ X_AC_QE_ARCH()
 
 # Add all needed -D options to try_dflags
 try_dflags=""
-try_iflags="-I../include"
+
+# "-I../include" is required by IOTK ...
+try_iflags="-I\$(TOPDIR)/include -I\$(TOPDIR)/FoX/finclude -I../include/"
 
 # Checking archiver...
 X_AC_QE_AR()
+
+# Checking OpenMP...
+X_AC_QE_OPENMP()
 
 # Checking MPIF90...
 X_AC_QE_MPIF90()
@@ -36,11 +42,8 @@ X_AC_QE_MPIF90()
 # Check environ...
 X_AC_QE_ENVIRON()
 
-# Checking MPIF90...
+# Checking CC...
 X_AC_QE_CC()
-
-# Checking FFTW pointers...
-X_AC_QE_FFTW_POINTER()
 
 # Checking F77...
 X_AC_QE_F77()
@@ -56,9 +59,6 @@ X_AC_QE_LD()
 
 # Checking F90 rule...
 X_AC_QE_F90RULE()
-
-# find Fortran to C wrappers
-X_AC_QE_WRAPPERS()
 
 AC_LANG_PUSH(Fortran 77)
 F77=$f90 # use Fortran 90 actually
@@ -86,25 +86,32 @@ X_AC_QE_SCALAPACK()
 # Setting ELPA...
 X_AC_QE_ELPA()
 
+# Enable XML ...
+X_AC_QE_XML()
+
+# Setting HDF5...
+X_AC_QE_HDF5()
+
 # Checking SIGNAL...
 X_AC_QE_SIGNAL()
-
-# xlf compilers (AIX and powerpc) want comma-separated -D directives
-X_AC_QE_AIX_DFLAGS()
 
 # Checking for ranlib...
 X_AC_QE_RANLIB()
 
-# check if wget or curl work  
+# Checking wget or curl...
 X_AC_QE_WGET()
 
+# Show dflags before adding $(MANUAL_DFLAGS) and adapt to XLF (if needed)
 if test "$dflags" = "" ; then dflags="$try_dflags" ; fi
-echo setting DFLAGS... $dflags
+echo setting DFLAGS... $try_dflags
+
+# xlf compilers (AIX and powerpc) want comma-separated -D directives
+X_AC_QE_AIX_DFLAGS()
 
 if test "$iflags" = "" ; then iflags="$try_iflags" ; fi
 echo setting IFLAGS... $iflags
 
-# export sdditional ettings to generated files
+# export additional settings to generated files
 AC_SUBST(dflags)
 AC_SUBST(fdflags)
 AC_SUBST(iflags)
@@ -113,12 +120,12 @@ AC_SUBST(topdir)
 AC_SUBST(extlib_flags)
 
 AC_CONFIG_HEADERS([include/c_defs.h:include/c_defs.h.in])
-AC_CONFIG_FILES([include/fft_defs.h:include/fft_defs.h.in])
+AC_CONFIG_FILES([include/configure.h:include/configure.h.in])
 
 #AC_CONFIG_FILES(Makefile.cpu)
-AC_CONFIG_FILES(make.sys)
+AC_CONFIG_FILES(make.inc)
 AC_CONFIG_FILES(configure.msg)
-AC_CONFIG_FILES(install/make_wannier90.sys)
+AC_CONFIG_FILES(install/make_wannier90.inc)
 
 
 AC_OUTPUT

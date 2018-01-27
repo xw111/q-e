@@ -27,7 +27,7 @@ SUBROUTINE vofrho_x( nfi, rhor, drhor, rhog, drhog, rhos, rhoc, tfirst, &
       USE ions_base,        ONLY: nsp, na, nat, rcmax, compute_eextfor
       USE ions_base,        ONLY: ind_srt, ind_bck
       USE gvecs
-      USE gvect,            ONLY: ngm, nl, nlm
+      USE gvect,            ONLY: ngm
       USE cell_base,        ONLY: omega, r_to_s
       USE cell_base,        ONLY: alat, at, tpiba2, h, ainv
       USE cell_base,        ONLY: ibrav, isotropic  !True if volume option is chosen for cell_dofree
@@ -62,6 +62,8 @@ SUBROUTINE vofrho_x( nfi, rhor, drhor, rhog, drhog, rhos, rhoc, tfirst, &
       USE tsvdw_module,     ONLY: EtsvdW,UtsvdW,FtsvdW,HtsvdW
       USE mp_global,        ONLY: me_image
       USE exx_module,       ONLY: dexx_dh, exxalfa  ! exx_wf related
+      USE fft_rho
+      USE fft_helper_subroutines
       
       USE plugin_variables, ONLY: plugin_etot
 
@@ -83,7 +85,6 @@ SUBROUTINE vofrho_x( nfi, rhor, drhor, rhog, drhog, rhos, rhoc, tfirst, &
       COMPLEX(DP)  fp, fm, ci, drhop, zpseu, zh
       COMPLEX(DP), ALLOCATABLE :: rhotmp(:), vtemp(:)
       COMPLEX(DP), ALLOCATABLE :: drhot(:,:)
-      COMPLEX(DP), ALLOCATABLE :: v(:), vs(:)
       REAL(DP), ALLOCATABLE    :: gagb(:,:), rhosave(:,:), rhocsave(:)
       !
       REAL(DP), ALLOCATABLE :: fion1( :, : )
@@ -363,10 +364,14 @@ SUBROUTINE vofrho_x( nfi, rhor, drhor, rhog, drhog, rhos, rhoc, tfirst, &
       !
       IF ( dft_is_nonlocc() ) THEN
          !
-         ! ... UGLY HACK WARNING: nlc adds nonlocal term (Ry) to input energy
+         ! ... UGLY HACK WARNING: nlc adds nonlocal term IN RYDBERG A.U.
+         ! ... to input energy and potential (potential is stored in rhor)
          !
          enlc = 0.0_dp
+         vtxc = 0.0_dp
+         rhor = rhor*e2
          CALL nlc( rhosave, rhocsave, nspin, enlc, vtxc, rhor )
+         rhor = rhor/e2
          CALL mp_sum( enlc, intra_bgrp_comm )
          exc = exc + enlc / e2
          !
@@ -374,6 +379,12 @@ SUBROUTINE vofrho_x( nfi, rhor, drhor, rhog, drhog, rhos, rhoc, tfirst, &
          ! ... transformed into energy derivative (Ha), added to dxc
          !
          IF ( tpre ) THEN
+             CALL mp_sum( vtxc, intra_bgrp_comm )
+             DO i=1,3
+                DO j=1,3
+                   dxc( i, j ) = dxc( i, j ) + (enlc - vtxc)/e2*ainv( j, i )
+                END DO
+             END DO
              denlc(:,:) = 0.0_dp
              inlc = get_inlc()
 
@@ -384,8 +395,6 @@ SUBROUTINE vofrho_x( nfi, rhor, drhor, rhog, drhog, rhos, rhoc, tfirst, &
                if (nspin>2) call errore('stress_rVV10', 'rVV10 non implemented with nspin>2',1)
                CALL stress_rVV10(rhosave, rhocsave, nspin, denlc )
              end if
-
-             CALL mp_sum( denlc, intra_bgrp_comm )
              dxc(:,:) = dxc(:,:) - omega/e2 * MATMUL(denlc,TRANSPOSE(ainv))
          END IF
          DEALLOCATE ( rhocsave, rhosave )
@@ -397,32 +406,7 @@ SUBROUTINE vofrho_x( nfi, rhor, drhor, rhog, drhog, rhos, rhoc, tfirst, &
       !
       IF (ts_vdw) THEN
         !
-        IF (dffts%npp(me_image+1).NE.0) THEN
-          !
-          IF (nspin.EQ.1) THEN
-            !
-!$omp parallel do
-            DO ir=1,dffts%npp(me_image+1)*dfftp%nr1*dfftp%nr2
-              !
-              rhor(ir,1)=rhor(ir,1)+UtsvdW(ir)
-              !
-            END DO
-!$omp end parallel do
-            !
-          ELSE IF (nspin.EQ.2) THEN
-            !
-!$omp parallel do
-            DO ir=1,dffts%npp(me_image+1)*dfftp%nr1*dfftp%nr2
-              !
-              rhor(ir,1)=rhor(ir,1)+UtsvdW(ir)
-              rhor(ir,2)=rhor(ir,2)+UtsvdW(ir)
-              !
-            END DO
-!$omp end parallel do
-            !
-          END IF
-          !
-        END IF
+        CALL fftx_add_field( rhor, UtsvdW, dfftp )
         !
       END IF
       !
@@ -437,65 +421,27 @@ SUBROUTINE vofrho_x( nfi, rhor, drhor, rhog, drhog, rhos, rhoc, tfirst, &
 !     fourier transform of xc potential to g-space (dense grid)
 !     -------------------------------------------------------------------
 !
-      ALLOCATE( v(  dfftp%nnr ) )
+      IF( abivol .or. abisur ) THEN
+         CALL rho_r2g ( rhor, rhog, v_vol )
+      ELSE
+         CALL rho_r2g ( rhor, rhog )
+      END IF
+       
       IF( nspin == 1 ) THEN
-         iss = 1
-         if (abivol.or.abisur) then
-!$omp parallel do
-            do ir=1, dfftp%nnr
-               v(ir)=CMPLX( rhor( ir, iss ) + v_vol( ir ), 0.d0 ,kind=DP)
-            end do           
-         else
-!$omp parallel do
-            do ir=1, dfftp%nnr
-               v(ir)=CMPLX( rhor( ir, iss ), 0.d0 ,kind=DP)
-            end do
-         end if
-         !
-         !     v_xc(r) --> v_xc(g)
-         !
-         CALL fwfft( 'Dense', v, dfftp )
-!
-!$omp parallel do
-         DO ig = 1, ngm
-            rhog( ig, iss ) = vtemp(ig) + v( nl( ig ) )
-         END DO
-         !
-         !     v_tot(g) = (v_tot(g) - v_xc(g)) +v_xc(g)
-         !     rhog contains the total potential in g-space
-         !
+         rhog( 1:ngm, 1 ) = rhog( 1:ngm, 1 ) + vtemp(1:ngm) 
       ELSE
          isup=1
          isdw=2
-         if (abivol.or.abisur) then
-!$omp parallel do
-            do ir=1, dfftp%nnr
-               v(ir)=CMPLX ( rhor(ir,isup)+v_vol(ir), &
-                             rhor(ir,isdw)+v_vol(ir),kind=DP)
-            end do
-         else
-!$omp parallel do
-            do ir=1, dfftp%nnr
-               v(ir)=CMPLX (rhor(ir,isup),rhor(ir,isdw),kind=DP)
-            end do
-         end if
-         CALL fwfft('Dense',v, dfftp )
-!$omp parallel do private(fp,fm)
-         DO ig=1,ngm
-            fp=v(nl(ig))+v(nlm(ig))
-            fm=v(nl(ig))-v(nlm(ig))
-            IF( ttsic ) THEN
-             rhog(ig,isup)=vtemp(ig)-self_vloc(ig) + &
-                           0.5d0*CMPLX( DBLE(fp),AIMAG(fm),kind=DP)
-             rhog(ig,isdw)=vtemp(ig)+self_vloc(ig) + &
-                           0.5d0*CMPLX(AIMAG(fp),-DBLE(fm),kind=DP)
-            ELSE
-             rhog(ig,isup)=vtemp(ig)+0.5d0*CMPLX( DBLE(fp),AIMAG(fm),kind=DP)
-             rhog(ig,isdw)=vtemp(ig)+0.5d0*CMPLX(AIMAG(fp),-DBLE(fm),kind=DP)
-            ENDIF
-         END DO
-      ENDIF
+         rhog( 1:ngm, isup ) = rhog( 1:ngm, isup ) + vtemp(1:ngm) 
+         rhog( 1:ngm, isdw ) = rhog( 1:ngm, isdw ) + vtemp(1:ngm) 
+         IF( ttsic ) THEN
+            rhog( 1:ngm, isup ) = rhog( 1:ngm, isup ) - self_vloc(1:ngm) 
+            rhog( 1:ngm, isdw ) = rhog( 1:ngm, isdw ) - self_vloc(1:ngm) 
+         END IF
+      END IF
+
       DEALLOCATE (vtemp)
+      IF( ttsic ) DEALLOCATE( self_vloc )
 !
 !     rhog contains now the total (local+Hartree+xc) potential in g-space
 !
@@ -525,101 +471,29 @@ SUBROUTINE vofrho_x( nfi, rhor, drhor, rhog, drhog, rhos, rhoc, tfirst, &
 
       DEALLOCATE( fion1 )
 !
-      IF( ttsic ) DEALLOCATE( self_vloc )
 !
 !     ===================================================================
 !     fourier transform of total potential to r-space (dense grid)
 !     -------------------------------------------------------------------
-      v(:) = (0.d0, 0.d0)
+      
+      CALL rho_g2r( rhog, rhor )
+
       IF(nspin.EQ.1) THEN
-         iss=1
-!$omp parallel do
-         DO ig=1,ngm
-            v(nl (ig))=rhog(ig,iss)
-            v(nlm(ig))=CONJG(rhog(ig,iss))
-         END DO
-!
-!     v(g) --> v(r)
-!
-         CALL invfft('Dense',v, dfftp )
-!
-!$omp parallel do
-         DO ir=1, dfftp%nnr
-            rhor(ir,iss)=DBLE(v(ir))
-         END DO
-!
-!     calculation of average potential
-!
-         vave=SUM(rhor(:,iss))/DBLE( dfftp%nr1* dfftp%nr2* dfftp%nr3)
+         vave=SUM(rhor(:,1))/DBLE( dfftp%nr1* dfftp%nr2* dfftp%nr3)
       ELSE
          isup=1
          isdw=2
-!$omp parallel do
-         DO ig=1,ngm
-            v(nl (ig))=rhog(ig,isup)+ci*rhog(ig,isdw)
-            v(nlm(ig))=CONJG(rhog(ig,isup)) +ci*CONJG(rhog(ig,isdw))
-         END DO
-!
-         CALL invfft('Dense',v, dfftp )
-!$omp parallel do
-         DO ir=1, dfftp%nnr
-            rhor(ir,isup)= DBLE(v(ir))
-            rhor(ir,isdw)=AIMAG(v(ir))
-         END DO
-         !
-         !     calculation of average potential
-         !
          vave=(SUM(rhor(:,isup))+SUM(rhor(:,isdw))) / 2.0d0 / DBLE(  dfftp%nr1 *  dfftp%nr2 *  dfftp%nr3 )
-      ENDIF
+      END IF
 
       CALL mp_sum( vave, intra_bgrp_comm )
 
       !
       !     fourier transform of total potential to r-space (smooth grid)
       !
-      ALLOCATE( vs( dffts%nnr ) )
-      vs (:) = (0.d0, 0.d0)
-      !
-      IF(nspin.EQ.1)THEN
-         !
-         iss=1
-!$omp parallel do
-         DO ig=1,ngms
-            vs(nlsm(ig))=CONJG(rhog(ig,iss))
-            vs(nls(ig))=rhog(ig,iss)
-         END DO
-         !
-         CALL invfft('Smooth',vs, dffts )
-         !
-!$omp parallel do
-         DO ir=1,dffts%nnr
-            rhos(ir,iss)=DBLE(vs(ir))
-         END DO
-         !
-      ELSE
-         !
-         isup=1
-         isdw=2
-!$omp parallel do
-         DO ig=1,ngms
-            vs(nls(ig))=rhog(ig,isup)+ci*rhog(ig,isdw)
-            vs(nlsm(ig))=CONJG(rhog(ig,isup)) +ci*CONJG(rhog(ig,isdw))
-         END DO 
-         !
-         CALL invfft('Smooth',vs, dffts )
-         !
-!$omp parallel do
-         DO ir=1,dffts%nnr
-            rhos(ir,isup)= DBLE(vs(ir))
-            rhos(ir,isdw)=AIMAG(vs(ir))
-         END DO
-         !
-      ENDIF
+      CALL smooth_rho_g2r ( rhog, rhos )
 
-      IF( dft_is_meta() ) CALL vofrho_meta( v, vs )
-
-      DEALLOCATE( vs )
-      DEALLOCATE( v )
+      IF( dft_is_meta() ) CALL vofrho_meta( )
 
       ebac = 0.0d0
       !
@@ -794,11 +668,13 @@ SUBROUTINE vofrho_x( nfi, rhor, drhor, rhog, drhog, rhos, rhoc, tfirst, &
             detmp = -1.0d0 * MATMUL( dxc, TRANSPOSE( h ) ) / omega * au_gpa * 10.0d0
             WRITE( stdout,5555) ((detmp(i,j),j=1,3),i=1,3)
             !
-            WRITE( stdout,*) "derivative of e(TS-vdW)"
-            WRITE( stdout,5555) ((HtsvdW(i,j),j=1,3),i=1,3)
-            WRITE( stdout,*) "kbar"
-            detmp = -1.0d0 * MATMUL( HtsvdW, TRANSPOSE( h ) ) / omega * au_gpa * 10.0d0
-            WRITE( stdout,5555) ((detmp(i,j),j=1,3),i=1,3)
+            IF (ts_vdw) THEN
+               WRITE( stdout,*) "derivative of e(TS-vdW)"
+               WRITE( stdout,5555) ((HtsvdW(i,j),j=1,3),i=1,3)
+               WRITE( stdout,*) "kbar"
+               detmp = -1.0d0 * MATMUL( HtsvdW, TRANSPOSE( h ) ) / omega * au_gpa * 10.0d0
+               WRITE( stdout,5555) ((detmp(i,j),j=1,3),i=1,3)
+            END IF
          ENDIF
       ENDIF
 

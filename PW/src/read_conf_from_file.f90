@@ -7,16 +7,20 @@
 !
 !
 !-----------------------------------------------------------------------
-FUNCTION read_config_from_file(nat, at_old,omega_old, lmovecell, at, bg, omega, tau) RESULT (ierr)
+FUNCTION read_config_from_file(nat, at_old, omega_old, lmovecell, at, bg, &
+     omega, tau) RESULT (ierr)
   !-----------------------------------------------------------------------
   !
   USE kinds,          ONLY : DP
   USE io_global,      ONLY : stdout
-!   USE ions_base,      ONLY : nat,  tau
-!   USE cell_base,      ONLY : at, bg, omega
-!   USE cellmd,         ONLY : at_old, omega_old, lmovecell
   USE io_files,       ONLY : tmp_dir, prefix
+#if defined (__OLDXML)
   USE pw_restart,     ONLY : pw_readfile
+#else
+  USE pw_restart_new,    ONLY  : pw_readschema_file, init_vars_from_schema
+  USE qes_types_module,     ONLY :  output_type, parallel_info_type, general_info_type
+  USE qes_libs_module,      ONLY :  qes_reset_output, qes_reset_general_info, qes_reset_parallel_info 
+#endif
   !
   IMPLICIT NONE
   !
@@ -26,6 +30,13 @@ FUNCTION read_config_from_file(nat, at_old,omega_old, lmovecell, at, bg, omega, 
   REAL(DP),INTENT(inout) :: at(3,3), bg(3,3), omega
   REAL(DP),INTENT(inout) :: tau(3,nat)
   INTEGER :: ierr
+!
+#if !defined(__OLDXML)
+  TYPE ( output_type)                   :: output_obj
+  TYPE (parallel_info_type)             ::  parinfo_obj
+  TYPE (general_info_type )             :: geninfo_obj 
+#endif
+
   !
   !
   WRITE( stdout, '(/5X,"Atomic positions and unit cell read from directory:", &
@@ -33,7 +44,17 @@ FUNCTION read_config_from_file(nat, at_old,omega_old, lmovecell, at, bg, omega, 
   !
   ! ... check if restart file is present, if yes read config parameters
   !
+#if defined(__OLDXML) 
   CALL pw_readfile( 'config', ierr )
+#else
+  CALL pw_readschema_file ( ierr, output_obj, parinfo_obj, geninfo_obj)
+  IF (ierr == 0 ) THEN 
+     CALL init_vars_from_schema ( 'config', ierr, output_obj, parinfo_obj, geninfo_obj ) 
+     CALL qes_reset_output(output_obj) 
+     CALL qes_reset_parallel_info (parinfo_obj) 
+     CALL qes_reset_general_info  (geninfo_obj) 
+  END IF 
+#endif
   !
   IF ( ierr > 0 ) THEN
      !

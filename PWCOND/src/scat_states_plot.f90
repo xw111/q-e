@@ -461,7 +461,7 @@ SUBROUTINE scat_states_comp(nchan, nrzp, norb, nocros, taunew, vec, &
     rho%of_r(:,:) = 0.d0
     call realus_scatt_1(becsum_orig)
     do ipol = 1, nspin
-#ifdef __MPI
+#if defined(__MPI)
      CALL gather_grid (dfftp, rho%of_r(:,ipol),spin_mag(:,ipol))
 #else
      do ig = 1, dfftp%nnr
@@ -534,11 +534,7 @@ SUBROUTINE scat_states_comp(nchan, nrzp, norb, nocros, taunew, vec, &
    xdatax(ig) = r_aux2*(ig-1)
   enddo
 
-  if(me_pool.eq.0) then
-   ik = 0
-  else
-   ik = SUM(dffts%npp(1:me_pool))
-  endif
+  ik = dffts%my_i0r3p
 
   do ipol = 1, nspin
    DO ix = 1, dfftp%nr1

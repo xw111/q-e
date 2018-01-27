@@ -1,5 +1,5 @@
 !
-! Copyright (C) 2002-2015 Quantum ESPRESSO group
+! Copyright (C) 2002-2017 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -25,12 +25,13 @@ SUBROUTINE move_ions ( idone )
   USE io_global,              ONLY : stdout
   USE io_files,               ONLY : tmp_dir
   USE kinds,                  ONLY : DP
-  USE cell_base,              ONLY : alat, at, bg, omega, cell_force, fix_volume, fix_area
+  USE cell_base,              ONLY : alat, at, bg, omega, cell_force, &
+                                     fix_volume, fix_area
   USE cellmd,                 ONLY : omega_old, at_old, press, lmovecell, calc
   USE ions_base,              ONLY : nat, ityp, zv, tau, if_pos
   USE fft_base,               ONLY : dfftp
   USE fft_base,               ONLY : dffts
-  USE grid_subroutines,       ONLY : realspace_grid_init
+  USE fft_types,              ONLY : fft_type_allocate
   USE gvect,                  ONLY : gcutm
   USE gvecs,                  ONLY : gcutms
   USE symm_base,              ONLY : checkallsym
@@ -42,15 +43,17 @@ SUBROUTINE move_ions ( idone )
   USE relax,                  ONLY : epse, epsf, epsp, starting_scf_threshold
   USE lsda_mod,               ONLY : lsda, absmag
   USE mp_images,              ONLY : intra_image_comm
+  USE mp_bands,               ONLY : intra_bgrp_comm, nyfft
   USE io_global,              ONLY : ionode_id, ionode
   USE mp,                     ONLY : mp_bcast
   USE bfgs_module,            ONLY : bfgs, terminate_bfgs
   USE basic_algebra_routines, ONLY : norm
   USE dynamics_module,        ONLY : verlet, terminate_verlet, proj_verlet
   USE dynamics_module,        ONLY : smart_MC, langevin_md
-  USE fcp                ,    ONLY : fcp_verlet, fcp_line_minimisation
+  USE fcp                ,    ONLY : fcp_verlet, fcp_line_minimisation, &
+                                     fcp_mdiis_update, fcp_mdiis_end
   USE fcp_variables,          ONLY : lfcpopt, lfcpdyn, fcp_mu, &
-                                     fcp_relax_crit
+                                     fcp_relax, fcp_relax_crit
   USE klist,                  ONLY : nelec
   USE dfunct,                 only : newd
   !
@@ -67,7 +70,6 @@ SUBROUTINE move_ions ( idone )
   REAL(DP), ALLOCATABLE :: pos(:), grad(:)
   REAL(DP)              :: h(3,3), fcell(3,3)=0.d0, epsp1
   INTEGER,  ALLOCATABLE :: fixion(:)
-  real(dp) :: tr
   LOGICAL               :: conv_fcp
   !
   ! ... only one node does the calculation in the parallel case
@@ -120,7 +122,11 @@ SUBROUTINE move_ions ( idone )
         ! ... relax for FCP
         !
         IF ( lfcpopt ) THEN
-           CALL fcp_line_minimisation( conv_fcp )
+           IF ( TRIM(fcp_relax) == 'lm' ) THEN
+              CALL fcp_line_minimisation( conv_fcp )
+           ELSE IF ( TRIM(fcp_relax) == 'mdiis' ) THEN
+              CALL fcp_mdiis_update( conv_fcp )
+           END IF
            IF ( .not. conv_fcp .and. idone < nstep ) THEN
              conv_ions = .FALSE.
            END IF
@@ -173,6 +179,9 @@ SUBROUTINE move_ions ( idone )
                & "( criteria force < ",ES8.1," )")') fcp_relax_crit
              WRITE( stdout, '(5X,"FCP Optimisation : tot_charge =",F12.6,/)') &
                SUM( zv(ityp(1:nat)) ) - nelec
+             IF ( TRIM(fcp_relax) == 'mdiis' ) THEN
+                CALL fcp_mdiis_end()
+             END IF
            END IF
            !
         ELSE
@@ -225,7 +234,11 @@ SUBROUTINE move_ions ( idone )
            ! ... relax for FCP
            !
            IF ( lfcpopt ) THEN
-              CALL fcp_line_minimisation( conv_fcp )
+              IF ( TRIM(fcp_relax) == 'lm' ) THEN
+                 CALL fcp_line_minimisation( conv_fcp )
+              ELSE IF ( TRIM(fcp_relax) == 'mdiis' ) THEN
+                 CALL fcp_mdiis_update( conv_fcp )
+              END IF
               IF ( .not. conv_fcp .and. idone < nstep ) conv_ions = .FALSE.
               !
               ! ... FCP output
@@ -235,6 +248,9 @@ SUBROUTINE move_ions ( idone )
                       & "( criteria force < ", ES8.1," )")') fcp_relax_crit
                  WRITE( stdout, '(5X,"FCP : final tot_charge =",F12.6,/)') &
                       SUM( zv(ityp(1:nat)) ) - nelec
+                 IF ( TRIM(fcp_relax) == 'mdiis' ) THEN
+                    CALL fcp_mdiis_end()
+                 END IF
               END IF
            END IF
            IF ( .NOT. conv_ions .AND. idone >= nstep ) THEN
@@ -296,7 +312,7 @@ SUBROUTINE move_ions ( idone )
      ! ... before leaving check that the new positions still transform
      ! ... according to the symmetry of the system.
      !
-     CALL checkallsym( nat, tau, ityp, dfftp%nr1, dfftp%nr2, dfftp%nr3 )
+     CALL checkallsym( nat, tau, ityp)
      !
   END IF
 
@@ -317,6 +333,10 @@ SUBROUTINE move_ions ( idone )
      ! ... prepare for a new run, restarted from scratch, not from previous
      ! ... data (dimensions and file lengths will be different in general)
      !
+     ! ... get magnetic moments from previous run before charge is deleted
+     !
+     CALL reset_starting_magnetization ( )
+     !
      CALL clean_pw( .FALSE. )
      CALL close_files(.TRUE.)
      lmovecell=.FALSE.
@@ -329,17 +349,13 @@ SUBROUTINE move_ions ( idone )
      if (trim(starting_wfc) == 'file') starting_wfc = 'atomic+random'
      ! ... conv_ions is set to .FALSE. to perform a final scf cycle
      conv_ions = .FALSE.
-     ! ... allow re-calculation of FFT grid
      !
-     dfftp%nr1=0; dfftp%nr2=0; dfftp%nr3=0; dffts%nr1=0; dffts%nr2=0; dffts%nr3=0
-     CALL realspace_grid_init (dfftp, at, bg, gcutm )
-     IF ( gcutms == gcutm ) THEN
-        ! ... No double grid, the two grids are the same
-        dffts%nr1 = dfftp%nr1 ; dffts%nr2 = dfftp%nr2 ; dffts%nr3 = dfftp%nr3
-        dffts%nr1x= dfftp%nr1x; dffts%nr2x= dfftp%nr2x; dffts%nr3x= dfftp%nr3x
-     ELSE          
-        CALL realspace_grid_init ( dffts, at, bg, gcutms)
-     END IF
+     ! ... re-set and re-calculate FFT grid 
+     !
+     dfftp%nr1=0; dfftp%nr2=0; dfftp%nr3=0
+     CALL fft_type_allocate (dfftp, at, bg, gcutm, intra_bgrp_comm, nyfft=nyfft)
+     dffts%nr1=0; dffts%nr2=0; dffts%nr3=0
+     CALL fft_type_allocate (dffts, at, bg, gcutms,intra_bgrp_comm, nyfft=nyfft)
      !
      CALL init_run()
      !
@@ -398,4 +414,72 @@ SUBROUTINE move_ions ( idone )
               5X,'Results may differ from those at the preceding step.' )
   !
 END SUBROUTINE move_ions
+!
+SUBROUTINE reset_starting_magnetization ( ) 
   !
+  ! On input,  the scf charge density is needed
+  ! On output, new values for starting_magnetization, angle1, angle2
+  ! estimated from atomic magnetic moments - to be used in last step
+  !
+  USE kinds,     ONLY : dp
+  USE constants, ONLY : pi
+  USE ions_base, ONLY : nsp, ityp, nat
+  USE lsda_mod,  ONLY : nspin, starting_magnetization
+  USE scf,       ONLY : rho
+  USE spin_orb,  ONLY : domag
+  USE noncollin_module, ONLY : noncolin, angle1, angle2
+  !
+  IMPLICIT NONE
+  INTEGER :: i, nt, iat
+  REAL(dp):: norm_tot, norm_xy, theta, phi
+  REAL (DP), ALLOCATABLE :: r_loc(:), m_loc(:,:)
+  !
+  IF ( (noncolin .AND. domag) .OR. nspin==2) THEN
+     ALLOCATE ( r_loc(nat), m_loc(nspin-1,nat) )
+     CALL get_locals(r_loc,m_loc,rho%of_r)
+  ELSE
+     RETURN
+  END IF
+  DO i = 1, nsp
+     !
+     starting_magnetization(i) = 0.0_DP
+     angle1(i) = 0.0_DP
+     angle2(i) = 0.0_DP
+     nt = 0
+     DO iat = 1, nat
+        IF (ityp(iat) == i) THEN
+           nt = nt + 1
+           IF (noncolin) THEN
+              norm_tot= sqrt(m_loc(1,iat)**2+m_loc(2,iat)**2+m_loc(3,iat)**2)
+              norm_xy = sqrt(m_loc(1,iat)**2+m_loc(2,iat)**2)
+              IF (norm_tot > 1.d-10) THEN
+                 theta = acos(m_loc(3,iat)/norm_tot)
+                 IF (norm_xy > 1.d-10) THEN
+                    phi = acos(m_loc(1,iat)/norm_xy)
+                    IF (m_loc(2,iat).lt.0.d0) phi = - phi
+                 ELSE
+                    phi = 2.d0*pi
+                 END IF
+              ELSE
+                 theta = 2.d0*pi
+                 phi = 2.d0*pi
+              END IF
+              angle1(i) = angle1(i) + theta
+              angle2(i) = angle2(i) + phi
+              starting_magnetization(i) = starting_magnetization(i) + &
+                   norm_tot/r_loc(iat)
+           ELSE
+              starting_magnetization(i) = starting_magnetization(i) + &
+                   m_loc(1,iat)/r_loc(iat)
+           END IF
+        END IF
+     END DO
+     IF ( nt > 0 ) THEN
+        starting_magnetization(i) = starting_magnetization(i) / DBLE(nt)
+        angle1(i) = angle1(i) / DBLE(nt)
+        angle2(i) = angle2(i) / DBLE(nt)
+     END IF
+  END DO
+  DEALLOCATE ( r_loc, m_loc )
+
+END SUBROUTINE reset_starting_magnetization

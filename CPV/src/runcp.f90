@@ -30,7 +30,6 @@
                                       my_bgrp_id, nbgrp, inter_bgrp_comm
       USE mp,                  ONLY : mp_sum
       USE fft_base,            ONLY : dffts
-      USE fft_parallel,        ONLY : tg_gather
       use wave_base,           only : wave_steepest, wave_verlet
       use control_flags,       only : lwf, tsde
       use uspp,                only : deeq, vkb
@@ -41,6 +40,7 @@
       use gvecw,               only : ngw, ngwx
       USE cp_interfaces,       ONLY : dforce
       USE ldaU_cp,             ONLY : lda_plus_u, vupsi
+      USE fft_helper_subroutines
       !
       IMPLICIT NONE
       !
@@ -70,8 +70,6 @@
      integer :: iflag
      logical :: ttsde
 
-
-
      iflag = 0
      !
      IF( PRESENT( fromscra ) ) THEN
@@ -82,8 +80,8 @@
      END IF
 
      IF( dffts%have_task_groups ) THEN
-        tg_rhos_siz = dffts%nogrp * dffts%tg_nnr
-        c2_siz      = dffts%nogrp * ngwx
+        tg_rhos_siz = dffts%nnr_tg
+        c2_siz      = dffts%nnr_tg
      ELSE
         tg_rhos_siz = 1
         c2_siz      = ngw 
@@ -118,7 +116,6 @@
          call ef_potential( nfi, rhos, bec_bgrp, deeq, vkb, c0_bgrp, cm_bgrp,&
                              emadt2, emaver, verl1, verl2 )
      ELSE
-
         allocate( c2( c2_siz ), c3( c2_siz ) )
         allocate( tg_rhos( tg_rhos_siz, nspin ) )
 
@@ -135,14 +132,13 @@
               CALL tg_gather( dffts, rhos(:,i), tg_rhos(:,i) )
            END DO
 
-           incr = 2 * dffts%nogrp
+           incr = 2 * fftx_ntgrp( dffts )
 
         ELSE
 
            incr = 2
 
         END IF
-
 
         DO i = 1, nbsp_bgrp, incr
 

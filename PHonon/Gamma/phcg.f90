@@ -13,12 +13,8 @@ PROGRAM phcg
   USE ions_base,     ONLY: nat, tau
   USE io_global,     ONLY: ionode
   USE io_files,      ONLY: seqopn
-  USE check_stop,    ONLY: check_stop_init
   USE mp_global,     ONLY: mp_startup, mp_global_end
   USE environment,   ONLY: environment_start
-  ! The following instruction is just to make it clear that all modules
-  ! from PWscf are needed sooner or later
-  USE pwcom          
   USE cgcom
 
   IMPLICIT NONE
@@ -29,11 +25,9 @@ PROGRAM phcg
   LOGICAL :: exst
   INTEGER :: i
   !
-  CALL check_stop_init ()
-  !
   ! Initialize MPI, clocks, print initial messages
   !
-#ifdef __MPI
+#if defined(__MPI)
   CALL mp_startup ( )
 #endif
   CALL environment_start ( code )
@@ -488,10 +482,10 @@ SUBROUTINE newscf
   USE gvecs, ONLY: doublegrid
   USE wvfct, ONLY: btype
   USE klist, ONLY: nkstot
-  USE wvfct, ONLY: nbnd, nbndx, qcutz
+  USE wvfct, ONLY: nbnd, nbndx
   USE noncollin_module, ONLY: report
   USE symm_base,     ONLY : nsym
-  USE io_files,      ONLY : iunigk, iunwfc, input_drho, output_drho
+  USE io_files,      ONLY : iunwfc, input_drho, output_drho, prefix, tmp_dir
   USE ldaU,          ONLY : lda_plus_u
   USE control_flags, ONLY : restart, io_level, lscf, iprint, &
                             david, max_cg_iter, &
@@ -499,6 +493,7 @@ SUBROUTINE newscf
   USE extrapolation, ONLY : extrapolate_charge
   !
   IMPLICIT NONE
+  CHARACTER(LEN=256) :: dirname
   INTEGER :: iter
   !
   CALL start_clock('PWSCF')
@@ -512,7 +507,6 @@ SUBROUTINE newscf
   lda_plus_u=.false.
   doublegrid=.false.
   lmovecell=.false.
-  qcutz=0.0d0
   iprint=10000
   input_drho=' '
   output_drho=' '
@@ -541,12 +535,12 @@ SUBROUTINE newscf
   !
   CALL openfil
   !
-  CALL extrapolate_charge( 1 )
+  dirname = TRIM(tmp_dir) //TRIM(prefix) // '.save/'
+  CALL extrapolate_charge( dirname, 1 )
   CALL hinit1
   CALL electrons ( )
   !
   CLOSE(unit=iunwfc, status='keep')
-  CLOSE(unit=iunigk, status='delete')
   !
   CALL stop_clock('PWSCF')
   !

@@ -32,20 +32,24 @@ xlf_flags=0
 
 echo using F90... $f90
 
-case "$arch:$f90_version" in
+case "$arch:$f90_flavor" in
 ia32:ifort* | ia64:ifort* | x86_64:ifort* | mac686:ifort* | crayxt*:ifort* )
-        try_fflags="-O2 -assume byterecl -g -traceback -par-report0 -vec-report0"
+        try_fflags="-O2 -assume byterecl -g -traceback"
         if test "$use_debug" -eq 1; then
             try_fflags="$try_fflags -fpe0 -CB"
         fi
   	    try_fflags_nomain="-nofor_main"
-        try_fflags_openmp="-openmp"
         try_f90flags="\$(FFLAGS) -nomodule"
         try_fflags_noopt="-O0 -assume byterecl -g -traceback"
         try_ldflags=""
         try_ldflags_static="-static"
-        try_ldflags_openmp="-openmp"
-        try_dflags="$try_dflags -D__INTEL"
+        if test "$f90_major_version" -ge "15"; then
+            try_fflags_openmp="-qopenmp"
+            try_ldflags_openmp="-qopenmp"
+        else
+            try_fflags_openmp="-openmp"
+            try_ldflags_openmp="-openmp"
+        fi
         pre_fdflags="-fpp "
         ;;
 x86_64:nagfor* )
@@ -60,21 +64,20 @@ x86_64:nagfor* )
         try_ldflags=""
         try_ldflags_static="-unsharedrts"
         try_ldflags_openmp="-openmp"
-        # -D__GFORTRAN needed
-        try_dflags="$try_dflags -D__NAG -D__GFORTRAN"
+        try_dflags="$try_dflags -D__NAG"
         have_cpp=0
         ;;
 ia32:pgf* | ia64:pgf* | x86_64:pgf* )
 	    try_fflags_nomain="-Mnomain"
         try_fflags="-fast -r8"
         try_fflags_openmp="-mp"
-        try_f90flags="-fast -r8 -Mcache_align"
+        try_f90flags="-fast -r8 -Mcache_align -Mpreprocess"
         try_fflags_noopt="-O0"
         try_ldflags=""
         try_ldflags_openmp="-mp"
         try_ldflags_static="-Bstatic"
         try_dflags="$try_dflags -D__PGI"
-        have_cpp=0
+        have_cpp=1
         ;;
 ia32:path* | ia64:path* | x86_64:path* )
         try_fflags="-march=auto -O2"
@@ -83,17 +86,6 @@ ia32:path* | ia64:path* | x86_64:path* )
         try_ldflags=""
         try_ldflags_static="-static"
         have_cpp=0
-        ;;
-*:g95 )
-        if test "$use_debug" -eq 1; then
-            try_fflags="-O3 -g -freal=nan -finteger=12345678 -flogical=none -cpp"
-        else
-            try_fflags="-O3 -cpp"
-        fi
-        try_f90flags="\$(FFLAGS)"
-        try_fflags_noopt="-O0 -cpp"
-        try_ldflags=""
-        try_ldflags_static="-static"
         ;;
 *:*gfortran )
         if test "$use_debug" -eq 1; then
@@ -106,57 +98,7 @@ ia32:path* | ia64:path* | x86_64:path* )
         try_fflags_noopt="-O0 -g"
         try_ldflags="-g -pthread"
         try_ldflags_openmp="-fopenmp"
-        try_dflags="$try_dflags -D__GFORTRAN -D__STD_F95"
         try_ldflags_static="-static"
-        ;;
-*:sunf95 )
-        try_fflags="-O4"
-        try_fflags_openmp="-openmp"
-        try_f90flags="\$(FFLAGS) -fpp"
-        try_fflags_noopt="-O0"
-        try_ldflags="-fast"
-        try_ldflags_static="-Bstatic"
-        imod="-M"
-        ;;
-*:openf95 )
-        try_fflags="-O3"
-        try_f90flags="\$(FFLAGS) -ftpp"
-        try_fflags_noopt="-O0"
-        try_ldflags=""
-        imod="-I"
-        ;;
-aix:*xlf* )
-        if test "$use_debug" -eq 1; then
-            try_fflags="-q64 -qalias=noaryovrlp -g -C \
--qarch=auto -qtune=auto -qdpc -Q -qalias=nointptr"
-        else
-            try_fflags="-q64 -qalias=noaryovrlp -O3 -qstrict \
--qarch=auto -qtune=auto -qdpc -Q -qalias=nointptr"
-        fi
-        try_fflags_openmp="-qsmp=omp"
-        try_f90flags="\$(FFLAGS) -qsuffix=cpp=f90 -qfree=f90"
-        try_fflags_noopt="-q64 -O0"
-        try_ldflags="-q64"
-        try_ldflags_openmp="-qsmp=omp"
-        # try_ldflags_static="-bstatic"
-        pre_fdflags="-WF,"
-        xlf_flags=1
-        ;;
-solaris:sunf95 )
-        try_fflags="-fast -O2 -fpp"
-        try_f90flags="\$(FFLAGS)"
-        try_fflags_noopt="-O0 "
-        try_ldflags=""
-        imod="-M"
-        ;;
-sparc:f90 )
-        try_fflags="-fast -O1 -nodepend -xvector=no -xchip=ultra3 \
--xarch=v8plusb -xlic_lib=sunperf"
-        try_f90flags="\$(FFLAGS)"
-        try_fflags_noopt="-O0 -xlic_lib=sunperf"
-        try_ldflags=""
-        imod="-M"
-        have_cpp=0
         ;;
 crayxt*:cray* )
         try_fflags_nomain=""
@@ -165,7 +107,8 @@ crayxt*:cray* )
         try_fflags="-O2"
         #NOTE: add '-rm' to get messages from crayftn about why
         #      optimizations have not been applied
-        try_f90flags="-O3,fp3 -f free"
+        #      -x dir disable directives introduced by !DIR$
+        try_f90flags="-O3,fp3 -f free -x dir"
         try_fflags_noopt="-O0"
         try_ldflags_openmp="-homp"
         try_ldflags="-v"
@@ -275,9 +218,7 @@ esac
 if test "$use_shared" -eq 0 ; then
   try_ldflags="$try_ldflags $try_ldflags_static" ; fi
 
-# Checking OpenMP...
-X_AC_QE_OPENMP()
-
+# Flags are repeated, need better way to handle this ...
 if test "$use_openmp" -eq 1 ; then
   try_f90flags="$try_f90flags $try_fflags_openmp"
   try_fflags="$try_fflags $try_fflags_openmp"

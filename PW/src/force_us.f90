@@ -16,17 +16,17 @@ SUBROUTINE force_us( forcenl )
   USE control_flags,        ONLY : gamma_only
   USE cell_base,            ONLY : at, bg, tpiba
   USE ions_base,            ONLY : nat, ntyp => nsp, ityp
-  USE klist,                ONLY : nks, xk, ngk
+  USE klist,                ONLY : nks, xk, ngk, igk_k
   USE gvect,                ONLY : g
-  USE uspp,                 ONLY : nkb, vkb, qq, deeq, qq_so, deeq_nc, indv_ijkb0
+  USE uspp,                 ONLY : nkb, vkb, qq_at, deeq, qq_so, deeq_nc, indv_ijkb0
   USE uspp_param,           ONLY : upf, nh, newpseudo, nhm
-  USE wvfct,                ONLY : nbnd, npw, npwx, igk, wg, et
+  USE wvfct,                ONLY : nbnd, npwx, wg, et
   USE lsda_mod,             ONLY : lsda, current_spin, isk, nspin
   USE symme,                ONLY : symvector
   USE wavefunctions_module, ONLY : evc
   USE noncollin_module,     ONLY : npol, noncolin
   USE spin_orb,             ONLY : lspinorb
-  USE io_files,             ONLY : iunwfc, nwordwfc, iunigk
+  USE io_files,             ONLY : iunwfc, nwordwfc
   USE buffers,              ONLY : get_buffer
   USE becmod,               ONLY : calbec, becp, bec_type, allocate_bec_type, &
                                    deallocate_bec_type
@@ -42,7 +42,7 @@ SUBROUTINE force_us( forcenl )
   COMPLEX(DP), ALLOCATABLE :: deff_nc(:,:,:,:)
   REAL(DP), ALLOCATABLE :: deff(:,:,:)
   TYPE(bec_type) :: dbecp                 ! contains <dbeta|psi>
-  INTEGER    :: ik, ipol, ig, jkb
+  INTEGER    :: npw, ik, ipol, ig, jkb
   !
   forcenl(:,:) = 0.D0
   !
@@ -57,16 +57,15 @@ SUBROUTINE force_us( forcenl )
   !
   ! ... the forces are a sum over the K points and over the bands
   !   
-  IF ( nks > 1 ) REWIND iunigk
   DO ik = 1, nks
      !
      IF ( lsda ) current_spin = isk(ik)
      npw = ngk (ik)
+
      IF ( nks > 1 ) THEN
-        READ( iunigk ) igk
         CALL get_buffer ( evc, nwordwfc, iunwfc, ik )
         IF ( nkb > 0 ) &
-             CALL init_us_2( npw, igk, xk(1,ik), vkb )
+             CALL init_us_2( npw, igk_k(1,ik), xk(1,ik), vkb )
      END IF
      !
      CALL calbec ( npw, vkb, evc, becp )
@@ -75,7 +74,7 @@ SUBROUTINE force_us( forcenl )
         DO jkb = 1, nkb
 !$omp parallel do default(shared) private(ig)
            do ig = 1, npw
-              vkb1(ig,jkb) = vkb(ig,jkb) * (0.D0,-1.D0) * g(ipol,igk(ig))
+              vkb1(ig,jkb) = vkb(ig,jkb) * (0.D0,-1.D0) * g(ipol,igk_k(ig,ik))
            END DO
 !$omp end parallel do
         END DO
@@ -107,15 +106,15 @@ SUBROUTINE force_us( forcenl )
   CALL deallocate_bec_type ( dbecp )   
   CALL deallocate_bec_type ( becp )   
   !
+  ! ... collect contributions across pools from all k-points
+  !
+  CALL mp_sum( forcenl, inter_pool_comm )
+  !
   ! ... The total D matrix depends on the ionic position via the
   ! ... augmentation part \int V_eff Q dr, the term deriving from the 
   ! ... derivative of Q is added in the routine addusforce
   !
   CALL addusforce( forcenl )
-  !
-  ! ... collect contributions across pools from all k-points
-  !
-  CALL mp_sum( forcenl, inter_pool_comm )
   !
   ! ... Since our summation over k points was only on the irreducible 
   ! ... BZ we have to symmetrize the forces.
@@ -153,7 +152,7 @@ SUBROUTINE force_us( forcenl )
                 ijkb0 = indv_ijkb0(na)
                 ! this is \sum_j q_{ij} <beta_j|psi>
                 CALL DGEMM ('N','N', nh(nt), becp%nbnd_loc, nh(nt), &
-                     1.0_dp, qq(1,1,nt), nhm, becp%r(ijkb0+1,1),&
+                     1.0_dp, qq_at(1,1,na), nhm, becp%r(ijkb0+1,1),&
                      nkb, 0.0_dp, aux, nh(nt) )
                 ! multiply by -\epsilon_n
 !$omp parallel do default(shared) private(ibnd_loc,ibnd,ih)
@@ -168,7 +167,7 @@ SUBROUTINE force_us( forcenl )
                 CALL DGEMM ('N','N', nh(nt), becp%nbnd_loc, nh(nt), &
                      1.0_dp, deeq(1,1,na,current_spin), nhm, &
                      becp%r(ijkb0+1,1), nkb, 1.0_dp, aux, nh(nt) )
-!$omp parallel do default(shared) private(ibnd_loc,ibnd,ih) reduction(+:forcenl)
+!$omp parallel do default(shared) private(ibnd_loc,ibnd,ih) reduction(-:forcenl)
                 DO ih = 1, nh(nt)
                    DO ibnd_loc = 1, becp%nbnd_loc
                       ibnd = ibnd_loc + becp%ibnd_begin - 1

@@ -22,7 +22,6 @@ SUBROUTINE dynmatcc(dyncc)
   USE gvect,      ONLY : nl, ngm, igtongl, ngl, g, gg, gl
   USE scf,        ONLY : rho, rho_core, rhog_core
   USE wavefunctions_module,  ONLY: psic
-  USE wvfct,      ONLY: nbnd, npwx, npw, g2kin, igk
   USE cgcom
   USE mp_global,  ONLY : intra_pool_comm
   USE mp,         ONLY : mp_sum
@@ -112,7 +111,7 @@ SUBROUTINE dynmatcc(dyncc)
   !
   DEALLOCATE(rhocg)
   DEALLOCATE(gc)
-#ifdef __MPI
+#if defined(__MPI)
   CALL mp_sum( dyncc1, intra_pool_comm )
 #endif
   CALL dscal(3*nat*3*nat,-omega,dyncc1,1)

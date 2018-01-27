@@ -5,33 +5,20 @@
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
 ! or http://www.gnu.org/copyleft/gpl.txt .
-!
-!--------------------------------------------------------------------------!
-! FFT scalar drivers Module - contains machine-dependent routines for      !
-! FFTW, FFTW3, ESSL (both 3d for serial execution and 1d+2d FFTs for       !
-! parallel execution; NEC ASL libraries (3d only, no parallel execution)   !
-! Written by Carlo Cavazzoni, modified by P. Giannozzi, contributions      !
-! by Martin Hilgemans, Guido Roma, Pascal Thibaudeau, Stephane Lefranc,    !
-! Nicolas Lacorne, Filippo Spiga, Nicola Varini - Last update Jul 2015     !
-!--------------------------------------------------------------------------!
-
-#if defined(__FFTW)
 
 !=----------------------------------------------------------------------=!
-   MODULE fft_scalar
+   MODULE fft_scalar_FFTW
 !=----------------------------------------------------------------------=!
 
-       USE, intrinsic ::  iso_c_binding
+       USE fft_param
+!! iso_c_binding provides C_PTR, C_NULL_PTR, C_ASSOCIATED
+       USE iso_c_binding
+       USE fftw_interfaces
        
        IMPLICIT NONE
        SAVE
-
        PRIVATE
        PUBLIC :: cft_1z, cft_2xy, cfft3d, cfft3ds
-
-! ...   Local Parameter
-
-#include "fft_param.f90"
 
 !=----------------------------------------------------------------------=!
    CONTAINS
@@ -71,24 +58,18 @@
      INTEGER, SAVE :: icurrent = 1
      LOGICAL :: found
 
-#if defined __HPM
-     INTEGER :: OMP_GET_THREAD_NUM
-#endif
      INTEGER :: tid
 
-#if defined(__OPENMP)
+#if defined(_OPENMP)
      INTEGER :: offset, ldz_t
      INTEGER :: omp_get_max_threads
      EXTERNAL :: omp_get_max_threads
 #endif
 
      !   Pointers to the "C" structures containing FFT factors ( PLAN )
-     !   C_POINTER is defined in include/fft_defs.h
-     !   for 32bit executables, C_POINTER is integer(4)
-     !   for 64bit executables, C_POINTER is integer(8)
 
-     C_POINTER, SAVE :: fw_planz( ndims ) = 0
-     C_POINTER, SAVE :: bw_planz( ndims ) = 0
+     TYPE(C_PTR), SAVE :: fw_planz( ndims ) = C_NULL_PTR
+     TYPE(C_PTR), SAVE :: bw_planz( ndims ) = C_NULL_PTR
 
      IF( nsl < 0 ) THEN
        CALL fftx_error__(" fft_scalar: cft_1z ", " nsl out of range ", nsl)
@@ -117,7 +98,7 @@
 #endif
 
 
-#if defined(__OPENMP)
+#if defined(_OPENMP)
 
      ldz_t = ldz
      !
@@ -180,8 +161,8 @@
      END SUBROUTINE lookup
 
      SUBROUTINE init_plan()
-       IF( fw_planz( icurrent) /= 0 ) CALL DESTROY_PLAN_1D( fw_planz( icurrent) )
-       IF( bw_planz( icurrent) /= 0 ) CALL DESTROY_PLAN_1D( bw_planz( icurrent) )
+       IF( C_ASSOCIATED(fw_planz( icurrent)) ) CALL DESTROY_PLAN_1D( fw_planz( icurrent) )
+       IF( C_ASSOCIATED(bw_planz( icurrent)) ) CALL DESTROY_PLAN_1D( bw_planz( icurrent) )
        idir = -1; CALL CREATE_PLAN_1D( fw_planz( icurrent), nz, idir)
        idir =  1; CALL CREATE_PLAN_1D( bw_planz( icurrent), nz, idir)
        zdims(1,icurrent) = nz; zdims(2,icurrent) = nsl; zdims(3,icurrent) = ldz;
@@ -229,10 +210,7 @@
      LOGICAL :: dofft( nfftx ), found
      INTEGER, PARAMETER  :: stdout = 6
 
-#if defined __HPM
-     INTEGER :: OMP_GET_THREAD_NUM
-#endif
-#if defined(__OPENMP)
+#if defined(_OPENMP)
      INTEGER :: offset
      INTEGER :: nx_t, ny_t, nzl_t, ldx_t, ldy_t
      INTEGER  :: itid, mytid, ntids
@@ -242,11 +220,11 @@
 
 
 #if defined(__FFTW_ALL_XY_PLANES)
-     C_POINTER, SAVE :: fw_plan_2d( ndims ) = 0
-     C_POINTER, SAVE :: bw_plan_2d( ndims ) = 0
+     TYPE(C_PTR), SAVE :: fw_plan_2d( ndims ) = C_NULL_PTR
+     TYPE(C_PTR), SAVE :: bw_plan_2d( ndims ) = C_NULL_PTR
 #else
-     C_POINTER, SAVE :: fw_plan( 2, ndims ) = 0
-     C_POINTER, SAVE :: bw_plan( 2, ndims ) = 0
+     TYPE(C_PTR), SAVE :: fw_plan( 2, ndims ) = C_NULL_PTR
+     TYPE(C_PTR), SAVE :: bw_plan( 2, ndims ) = C_NULL_PTR
 #endif
 
 
@@ -298,7 +276,7 @@
         !
      END IF
 
-#elif defined(__OPENMP)
+#elif defined(_OPENMP)
 
      nx_t  = nx
      ny_t  = ny
@@ -433,18 +411,18 @@
 
      SUBROUTINE init_plan()
 #if defined __FFTW_ALL_XY_PLANES
-       IF( fw_plan_2d( icurrent) /= 0 )  CALL DESTROY_PLAN_2D(fw_plan_2d(icurrent) )
-       IF( bw_plan_2d( icurrent) /= 0 )  CALL DESTROY_PLAN_2D(bw_plan_2d(icurrent) )
+       IF( C_ASSOCIATED(fw_plan_2d( icurrent)) )  CALL DESTROY_PLAN_2D(fw_plan_2d(icurrent) )
+       IF( C_ASSOCIATED(bw_plan_2d( icurrent)) )  CALL DESTROY_PLAN_2D(bw_plan_2d(icurrent) )
        idir = -1; CALL CREATE_PLAN_2D( fw_plan_2d(icurrent), nx, ny, idir)
        idir =  1; CALL CREATE_PLAN_2D( bw_plan_2d(icurrent), nx, ny, idir)
 #else
-       IF( fw_plan( 2,icurrent) /= 0 )   CALL DESTROY_PLAN_1D( fw_plan( 2,icurrent) )
-       IF( bw_plan( 2,icurrent) /= 0 )   CALL DESTROY_PLAN_1D( bw_plan( 2,icurrent) )
+       IF( C_ASSOCIATED(fw_plan( 2,icurrent)) )   CALL DESTROY_PLAN_1D( fw_plan( 2,icurrent) )
+       IF( C_ASSOCIATED(bw_plan( 2,icurrent)) )   CALL DESTROY_PLAN_1D( bw_plan( 2,icurrent) )
        idir = -1; CALL CREATE_PLAN_1D( fw_plan( 2,icurrent), ny, idir)
        idir =  1; CALL CREATE_PLAN_1D( bw_plan( 2,icurrent), ny, idir)
 
-       IF( fw_plan( 1,icurrent) /= 0 ) CALL DESTROY_PLAN_1D( fw_plan( 1,icurrent) )
-       IF( bw_plan( 1,icurrent) /= 0 ) CALL DESTROY_PLAN_1D( bw_plan( 1,icurrent) )
+       IF( C_ASSOCIATED(fw_plan( 1,icurrent)) ) CALL DESTROY_PLAN_1D( fw_plan( 1,icurrent) )
+       IF( C_ASSOCIATED(bw_plan( 1,icurrent)) ) CALL DESTROY_PLAN_1D( bw_plan( 1,icurrent) )
        idir = -1; CALL CREATE_PLAN_1D( fw_plan( 1,icurrent), nx, idir)
        idir =  1; CALL CREATE_PLAN_1D( bw_plan( 1,icurrent), nx, idir)
 #endif
@@ -469,7 +447,7 @@
 !=----------------------------------------------------------------------=!
 !
 
-   SUBROUTINE cfft3d( f, nx, ny, nz, ldx, ldy, ldz, isign )
+   SUBROUTINE cfft3d( f, nx, ny, nz, ldx, ldy, ldz, howmany, isign )
 
   !     driver routine for 3d complex fft of lengths nx, ny, nz
   !     input  :  f(ldx*ldy*ldz)  complex, transform is in-place
@@ -484,15 +462,15 @@
 
      IMPLICIT NONE
 
-     INTEGER, INTENT(IN) :: nx, ny, nz, ldx, ldy, ldz, isign
+     INTEGER, INTENT(IN) :: nx, ny, nz, ldx, ldy, ldz, howmany, isign
      COMPLEX (DP) :: f(:)
      INTEGER :: i, k, j, err, idir, ip
      REAL(DP) :: tscale
      INTEGER, SAVE :: icurrent = 1
      INTEGER, SAVE :: dims(3,ndims) = -1
 
-     C_POINTER, save :: fw_plan(ndims) = 0
-     C_POINTER, save :: bw_plan(ndims) = 0
+     TYPE(C_PTR), save :: fw_plan(ndims) = C_NULL_PTR
+     TYPE(C_PTR), save :: bw_plan(ndims) = C_NULL_PTR
 
      IF ( nx < 1 ) &
          call fftx_error__('cfft3d',' nx is less than 1 ', 1)
@@ -553,8 +531,8 @@
      SUBROUTINE init_plan()
        IF ( nx /= ldx .or. ny /= ldy .or. nz /= ldz ) &
          call fftx_error__('cfft3','not implemented',1)
-       IF( fw_plan(icurrent) /= 0 ) CALL DESTROY_PLAN_3D( fw_plan(icurrent) )
-       IF( bw_plan(icurrent) /= 0 ) CALL DESTROY_PLAN_3D( bw_plan(icurrent) )
+       IF( C_ASSOCIATED (fw_plan(icurrent)) ) CALL DESTROY_PLAN_3D( fw_plan(icurrent) )
+       IF( C_ASSOCIATED (bw_plan(icurrent)) ) CALL DESTROY_PLAN_3D( bw_plan(icurrent) )
        idir = -1; CALL CREATE_PLAN_3D( fw_plan(icurrent), nx, ny, nz, idir)
        idir =  1; CALL CREATE_PLAN_3D( bw_plan(icurrent), nx, ny, nz, idir)
        dims(1,icurrent) = nx; dims(2,icurrent) = ny; dims(3,icurrent) = nz
@@ -576,13 +554,13 @@
 !=----------------------------------------------------------------------=!
 !
 
-SUBROUTINE cfft3ds (f, nx, ny, nz, ldx, ldy, ldz, isign, &
-     do_fft_x, do_fft_y)
+SUBROUTINE cfft3ds (f, nx, ny, nz, ldx, ldy, ldz, howmany, isign, &
+     do_fft_z, do_fft_y)
   !
   !     driver routine for 3d complex "reduced" fft - see cfft3d
   !     The 3D fft are computed only on lines and planes which have
   !     non zero elements. These lines and planes are defined by
-  !     the two integer vectors do_fft_x(ldy*nz) and do_fft_y(nz)
+  !     the two integer vectors do_fft_y(nx) and do_fft_z(ldx*ldy)
   !     (1 = perform fft, 0 = do not perform fft)
   !     This routine is implemented only for fftw, essl, acml
   !     If not implemented, cfft3d is called instead
@@ -591,28 +569,31 @@ SUBROUTINE cfft3ds (f, nx, ny, nz, ldx, ldy, ldz, isign, &
   !
   implicit none
 
-  integer :: nx, ny, nz, ldx, ldy, ldz, isign
+  integer :: nx, ny, nz, ldx, ldy, ldz, howmany, isign
   !
   !   logical dimensions of the fft
   !   physical dimensions of the f array
   !   sign of the transformation
 
-  complex(DP) :: f ( ldx * ldy * ldz )
-  integer :: do_fft_x(:), do_fft_y(:)
+  complex(DP) :: f ( ldx * ldy * ldz * howmany )
+  integer :: do_fft_z(:), do_fft_y(:)
   !
   integer :: m, incx1, incx2
-  INTEGER :: i, k, j, err, idir, ip,  ii, jj
+  INTEGER :: i, k, j, err, idir, ip,  ii, jj, h, ldh
   REAL(DP) :: tscale
   INTEGER, SAVE :: icurrent = 1
   INTEGER, SAVE :: dims(3,ndims) = -1
 
-  C_POINTER, SAVE :: fw_plan ( 3, ndims ) = 0
-  C_POINTER, SAVE :: bw_plan ( 3, ndims ) = 0
+  TYPE(C_PTR), SAVE :: fw_plan ( 3, ndims ) = C_NULL_PTR
+  TYPE(C_PTR), SAVE :: bw_plan ( 3, ndims ) = C_NULL_PTR
 
   tscale = 1.0_DP
+  ldh = ldx * ldy * ldz
 
   IF( ny /= ldy ) &
     CALL fftx_error__(' cfft3ds ', ' wrong dimensions: ny /= ldy ', 1 )
+  IF( howmany < 1 ) &
+    CALL fftx_error__(' cfft3ds ', ' howmany less than one ', 1 )
 
      CALL lookup()
 
@@ -628,83 +609,84 @@ SUBROUTINE cfft3ds (f, nx, ny, nz, ldx, ldy, ldz, isign, &
 
      IF ( isign > 0 ) THEN
 
-        !
-        !  i - direction ...
-        !
+        DO h = 0, howmany - 1
+           !
+           !  k-direction ...
+           !
 
-        incx1 = 1;  incx2 = ldx;  m = 1
+           incx1 = ldx * ldy;  incx2 = 1;  m = 1
 
-        do k = 1, nz
-           do j = 1, ny
-              jj = j + ( k - 1 ) * ldy
-              ii = 1 + ldx * ( jj - 1 )
-              if ( do_fft_x( jj ) == 1 ) THEN
-                call FFTW_INPLACE_DRV_1D( bw_plan( 1, ip), m, f( ii ), incx1, incx2 )
+           do i =1, nx
+              do j = 1, ny
+                 ii = i + ldx * (j-1)
+                 if ( do_fft_z(ii) > 0 ) then
+                    call FFTW_INPLACE_DRV_1D( bw_plan( 3, ip), m, f( ii + h*ldh ), incx1, incx2 )
+                 end if
+              end do
+           end do
+
+           !
+           !  ... j-direction ...
+           !
+
+           incx1 = ldx;  incx2 = ldx*ldy;  m = nz
+   
+           do i = 1, nx
+              if ( do_fft_y( i ) == 1 ) then
+                call FFTW_INPLACE_DRV_1D( bw_plan( 2, ip), m, f( i + h*ldh ), incx1, incx2 )
               endif
            enddo
-        enddo
 
-        !
-        !  ... j-direction ...
-        !
+           !
+           !  ... i - direction
+           !
 
-        incx1 = ldx;  incx2 = 1;  m = nx
+           incx1 = 1;  incx2 = ldx;  m = ldy*nz
 
-        do k = 1, nz
-           ii = 1 + ldx * ldy * ( k - 1 )
-           if ( do_fft_y( k ) == 1 ) then
-             call FFTW_INPLACE_DRV_1D( bw_plan( 2, ip), m, f( ii ), incx1, incx2 )
-           endif
-        enddo
+           call FFTW_INPLACE_DRV_1D( bw_plan( 1, ip), m, f( 1 + h*ldh ), incx1, incx2 )
 
-        !
-        !     ... k-direction
-        !
-
-        incx1 = ldx * ldy;  incx2 = 1;  m = ldx * ny
-
-        call FFTW_INPLACE_DRV_1D( bw_plan( 3, ip), m, f( 1 ), incx1, incx2 )
+        END DO
 
      ELSE
 
-        !
-        !     ... k-direction
-        !
+        DO h = 0, howmany - 1
+           !
+           !  i - direction ...
+           !
 
-        incx1 = ldx * ny;  incx2 = 1;  m = ldx * ny
+           incx1 = 1;  incx2 = ldx;  m = ldy*nz
 
-        call FFTW_INPLACE_DRV_1D( fw_plan( 3, ip), m, f( 1 ), incx1, incx2 )
+           call FFTW_INPLACE_DRV_1D( fw_plan( 1, ip), m, f( 1 + h*howmany ), incx1, incx2 )
 
-        !
-        !     ... j-direction ...
-        !
+           !
+           !  ... j-direction ...
+           !
 
-        incx1 = ldx;  incx2 = 1;  m = nx
+           incx1 = ldx;  incx2 = ldx*ldy;  m = nz
 
-        do k = 1, nz
-           ii = 1 + ldx * ldy * ( k - 1 )
-           if ( do_fft_y ( k ) == 1 ) then
-             call FFTW_INPLACE_DRV_1D( fw_plan( 2, ip), m, f( ii ), incx1, incx2 )
-           endif
-        enddo
-
-        !
-        !     i - direction ...
-        !
-
-        incx1 = 1;  incx2 = ldx;  m = 1
-
-        do k = 1, nz
-           do j = 1, ny
-              jj = j + ( k - 1 ) * ldy
-              ii = 1 + ldx * ( jj - 1 )
-              if ( do_fft_x( jj ) == 1 ) then
-                call FFTW_INPLACE_DRV_1D( fw_plan( 1, ip), m, f( ii ), incx1, incx2 )
+           do i = 1, nx
+              if ( do_fft_y ( i ) == 1 ) then
+                call FFTW_INPLACE_DRV_1D( fw_plan( 2, ip), m, f( i + h*howmany ), incx1, incx2 )
               endif
            enddo
-        enddo
 
-        call DSCAL (2 * ldx * ldy * nz, 1.0_DP/(nx * ny * nz), f(1), 1)
+           !
+           !  ... k-direction
+           !
+
+           incx1 = ldx * ny;  incx2 = 1;  m = 1
+ 
+           do i = 1, nx
+              do j = 1, ny
+                 ii = i + ldx * (j -1)
+                 if ( do_fft_z ( ii ) > 0 ) then
+                    call FFTW_INPLACE_DRV_1D( fw_plan( 3, ip), m, f( ii + h*howmany ), incx1, incx2 )
+                 end if
+              end do
+           end do
+
+           call DSCAL (2 * ldx * ldy * nz, 1.0_DP/(nx * ny * nz), f(1+ h*howmany ), 1)
+        END DO
 
      END IF
      RETURN
@@ -725,12 +707,12 @@ SUBROUTINE cfft3ds (f, nx, ny, nz, ldx, ldy, ldz, isign, &
      END SUBROUTINE lookup
 
      SUBROUTINE init_plan()
-       IF( fw_plan( 1, icurrent) /= 0 ) CALL DESTROY_PLAN_1D( fw_plan( 1, icurrent) )
-       IF( bw_plan( 1, icurrent) /= 0 ) CALL DESTROY_PLAN_1D( bw_plan( 1, icurrent) )
-       IF( fw_plan( 2, icurrent) /= 0 ) CALL DESTROY_PLAN_1D( fw_plan( 2, icurrent) )
-       IF( bw_plan( 2, icurrent) /= 0 ) CALL DESTROY_PLAN_1D( bw_plan( 2, icurrent) )
-       IF( fw_plan( 3, icurrent) /= 0 ) CALL DESTROY_PLAN_1D( fw_plan( 3, icurrent) )
-       IF( bw_plan( 3, icurrent) /= 0 ) CALL DESTROY_PLAN_1D( bw_plan( 3, icurrent) )
+       IF( C_ASSOCIATED (fw_plan( 1, icurrent)) ) CALL DESTROY_PLAN_1D( fw_plan( 1, icurrent) )
+       IF( C_ASSOCIATED (bw_plan( 1, icurrent)) ) CALL DESTROY_PLAN_1D( bw_plan( 1, icurrent) )
+       IF( C_ASSOCIATED (fw_plan( 2, icurrent)) ) CALL DESTROY_PLAN_1D( fw_plan( 2, icurrent) )
+       IF( C_ASSOCIATED (bw_plan( 2, icurrent)) ) CALL DESTROY_PLAN_1D( bw_plan( 2, icurrent) )
+       IF( C_ASSOCIATED (fw_plan( 3, icurrent)) ) CALL DESTROY_PLAN_1D( fw_plan( 3, icurrent) )
+       IF( C_ASSOCIATED (bw_plan( 3, icurrent)) ) CALL DESTROY_PLAN_1D( bw_plan( 3, icurrent) )
        idir = -1; CALL CREATE_PLAN_1D( fw_plan( 1, icurrent), nx, idir)
        idir =  1; CALL CREATE_PLAN_1D( bw_plan( 1, icurrent), nx, idir)
        idir = -1; CALL CREATE_PLAN_1D( fw_plan( 2, icurrent), ny, idir)
@@ -746,7 +728,6 @@ SUBROUTINE cfft3ds (f, nx, ny, nz, ldx, ldy, ldz, isign, &
    END SUBROUTINE cfft3ds
 
 !=----------------------------------------------------------------------=!
-   END MODULE fft_scalar
+ END MODULE fft_scalar_FFTW
 !=----------------------------------------------------------------------=!
 
-#endif

@@ -14,7 +14,10 @@ AC_DEFUN([X_AC_QE_ARCH], [
 # (only on NEC SX8 actually)
 if test "$host" != "" ; then ranlib=echo; fi
 
-cross_compiling=yes
+
+# cross compiling? Why?
+#cross_compiling=yes
+
 if test "$host" = "" ; then host=$build; fi
 
 # identify host architecture
@@ -25,10 +28,7 @@ then
                 x86_64-*-linux-gnu )    arch=x86_64 ;;
                 arm-*linux* )           arch=arm    ;;
                 *-pc-linux-gnu )        arch=ia32   ;;
-                *-ibm-aix* )            arch=aix    ;;
-                sparc-sun-* )           arch=sparc  ;;
-                i386-pc-solaris* )      arch=solaris;;
-                i*86-apple-darwin* )    arch=mac686 ;;
+                *-apple-darwin* )       arch=mac686 ;;
                 *-pc-cygwin )           arch=cygwin ;;
                 sx*-nec* )              arch=necsx  ;;
                 powerpc64-*-linux-gnu ) arch=ppc64  ;;
@@ -45,5 +45,6 @@ then
 fi
 
   AC_MSG_RESULT(${arch})
+  AC_SUBST(arch)
 
 ])

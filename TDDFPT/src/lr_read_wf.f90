@@ -1,5 +1,5 @@
 !
-! Copyright (C) 2001-2015 Quantum ESPRESSO group
+! Copyright (C) 2001-2016 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -16,9 +16,9 @@ SUBROUTINE lr_read_wf()
   ! Modified by Xiaochuan Ge (2013) to fix some bugs of virt_read and include Davidson
   !
   USE kinds,                ONLY : dp
+  USE cell_base,            ONLY : at
   USE io_global,            ONLY : stdout
-  USE klist,                ONLY : nks, xk
-  USE cell_base,            ONLY : tpiba2
+  USE klist,                ONLY : nks, xk, ngk, igk_k
   USE gvect,                ONLY : ngm, g
   USE io_files,             ONLY : nwordwfc, iunwfc, prefix, diropn,&
                                  & tmp_dir, wfc_dir 
@@ -27,7 +27,7 @@ SUBROUTINE lr_read_wf()
                                  & becp1_c_virt, no_hxc, becp_1, becp1_c, &
                                  & test_case_no, size_evc, project,       &
                                  & lr_verbosity, lr_exx, davidson, eels
-  USE wvfct,                ONLY : npw, igk, nbnd, g2kin, npwx, ecutwfc
+  USE wvfct,                ONLY : nbnd, npwx
   USE control_flags,        ONLY : gamma_only,io_level
   USE gvecs,                ONLY : nls, nlsm
   USE fft_base,             ONLY : dffts
@@ -38,16 +38,15 @@ SUBROUTINE lr_read_wf()
                                  & initialisation_level,&
                                  & fwfft_orbital_gamma, calbec_rs_gamma,&
                                  & add_vuspsir_gamma, v_loc_psir,&
-                                 & s_psir_gamma, real_space_debug, &
-                                 & igk_k,npw_k  
-  USE buffers,              ONLY : get_buffer
-  USE exx,                  ONLY : exx_grid_init, exx_div_check, exx_restart
+                                 & s_psir_gamma, real_space_debug
+  USE exx,                  ONLY : exx_grid_reinit, exx_div_check, exx_restart
   USE funct,                ONLY : dft_is_hybrid
   USE lr_exx_kernel,        ONLY : lr_exx_revc0_init, lr_exx_alloc
   USE wavefunctions_module, ONLY : evc
   USE buffers,              ONLY : open_buffer
   USE qpoint,               ONLY : nksq
   USE noncollin_module,     ONLY : npol
+  USE fft_helper_subroutines
   !
   IMPLICIT NONE
   !
@@ -69,16 +68,18 @@ SUBROUTINE lr_read_wf()
      CALL normal_read()
   ENDIF
   !
-  !WRITE(stdout,'(5x,"Finished reading wfc.")')
-  !
   IF (.NOT.eels) evc(:,:) = evc0(:,:,1)
   !
   IF ( dft_is_hybrid() ) THEN
      !
      CALL open_buffer ( iunwfc, 'wfc', nwordwfc, io_level, exst ) 
-     CALL exx_grid_init()
+     !
+     CALL exx_grid_reinit(at)
      CALL exx_div_check()
-     CALL exx_restart(.true.)
+     !
+     ! set_ace=.false. disables Lin Lin's ACE for TD-DFPT 
+     !
+     CALL exx_restart( set_ace=.false.)
      !
      IF (.NOT. no_hxc) THEN
         !
@@ -106,23 +107,21 @@ SUBROUTINE normal_read()
   !
   ! The usual way of reading wavefunctions
   !
-  USE lr_variables,             ONLY : check_all_bands_gamma, &
-                                     & check_density_gamma,   &
-                                     & check_vector_gamma, tg_revc0
+  USE lr_variables,             ONLY : tg_revc0
   USE wavefunctions_module,     ONLY : psic
   USE realus,                   ONLY : tg_psic
   USE mp_global,                ONLY : me_bgrp
   !
   IMPLICIT NONE
   !
-  LOGICAL :: use_tg
   INTEGER :: v_siz, incr, ioff, j
   !
   WRITE( stdout, '(/5x,"Normal read")' )
   !
-  use_tg = dffts%have_task_groups
-  size_evc = nksq * nbnd * npwx * npol
   incr = 2
+  !
+  size_evc = nbnd * npwx * npol * nksq
+  nwordwfc = nbnd * npwx * npol
   !
   ! Read in the ground state wavefunctions.
   ! This is a parallel read, done in wfc_dir.
@@ -175,7 +174,7 @@ SUBROUTINE normal_read()
         ! Following line is to be removed when real space
         ! implementation is complete.
         !
-        CALL init_us_2(npw,igk_k(:,1),xk(1,1),vkb)
+        CALL init_us_2(ngk(1),igk_k(:,1),xk(1,1),vkb)
         !
         IF (real_space_debug>0) THEN
            !
@@ -192,9 +191,9 @@ SUBROUTINE normal_read()
            !
         ELSE
            !
-           CALL calbec(npw_k(1),vkb,evc0(:,:,1),becp_1)
+           CALL calbec(ngk(1),vkb,evc0(:,:,1),becp_1)
            becp%r = becp_1
-           CALL s_psi(npwx, npw_k(1), nbnd, evc0(:,:,1), sevc0(:,:,1))
+           CALL s_psi(npwx, ngk(1), nbnd, evc0(:,:,1), sevc0(:,:,1))
            !
         ENDIF
         ! 
@@ -204,10 +203,10 @@ SUBROUTINE normal_read()
         !
         DO ik = 1, nks
            !
-           CALL init_us_2(npw_k(ik),igk_k(1,ik),xk(1,ik),vkb)
-           CALL calbec(npw_k(ik),vkb,evc0(:,:,ik),becp1_c(:,:,ik))
+           CALL init_us_2(ngk(ik),igk_k(1,ik),xk(1,ik),vkb)
+           CALL calbec(ngk(ik),vkb,evc0(:,:,ik),becp1_c(:,:,ik))
            becp%k = becp1_c(:,:,ik)
-           CALL s_psi (npwx, npw_k(ik), nbnd, evc0(:,:,ik), sevc0(:,:,ik)) 
+           CALL s_psi (npwx, ngk(ik), nbnd, evc0(:,:,ik), sevc0(:,:,ik)) 
            !
         ENDDO
         !
@@ -224,8 +223,8 @@ SUBROUTINE normal_read()
   !
   IF ( dffts%have_task_groups ) THEN
        !
-       v_siz =  dffts%tg_nnr * dffts%nogrp
-       incr = 2 * dffts%nogrp
+       v_siz =  dffts%nnr_tg
+       incr = 2 * fftx_ntgrp(dffts)
        tg_revc0 = (0.0d0,0.0d0)
        !
   ELSE
@@ -242,7 +241,7 @@ SUBROUTINE normal_read()
         !
         IF (dffts%have_task_groups) THEN               
            !
-           DO j = 1, dffts%nr1x*dffts%nr2x*dffts%tg_npp( me_bgrp + 1 )
+           DO j = 1, dffts%nr1x*dffts%nr2x*dffts%my_nr3p
                !
                tg_revc0(j,ibnd,1) = tg_psic(j)
                !  
@@ -263,15 +262,13 @@ SUBROUTINE normal_read()
      !
      DO ik = 1, nks
         DO ibnd = 1, nbnd
-           DO ig = 1, npw_k(ik)
+           DO ig = 1, ngk(ik)
                !
                revc0(nls(igk_k(ig,ik)),ibnd,ik) = evc0(ig,ibnd,ik)
                !
            ENDDO
            !
-           dffts%have_task_groups = .false.
            CALL invfft ('Wave', revc0(:,ibnd,ik), dffts)
-           dffts%have_task_groups=use_tg
            !
         ENDDO
      ENDDO
@@ -293,7 +290,7 @@ SUBROUTINE virt_read()
   !
   ! The modifications to read also the virtual orbitals.
   !
-  USE control_ph,            ONLY : nbnd_occ
+  USE control_lr,            ONLY : nbnd_occ
   USE becmod,                ONLY : allocate_bec_type, deallocate_bec_type
   !
   IMPLICIT NONE
@@ -339,7 +336,8 @@ SUBROUTINE virt_read()
      !
   ENDIF
   !
-  size_evc = nksq * nbnd_occ(1) * npwx * npol
+  size_evc = nbnd_occ(1) * npwx * npol * nksq
+  nwordwfc = nbnd * npwx * npol                 ! nbnd > nbnd_occ(1)
   !
   ! Read in the ground state wavefunctions
   ! This is a parallel read, done in wfc_dir
@@ -391,7 +389,7 @@ SUBROUTINE virt_read()
         ! Following line is to be removed when real space 
         ! implementation is complete.
         !
-        CALL init_us_2(npw,igk_k(:,1),xk(1,1),vkb)
+        CALL init_us_2(ngk(1),igk_k(:,1),xk(1,1),vkb)
         !    
         IF (real_space_debug>0) THEN
            !
@@ -405,9 +403,9 @@ SUBROUTINE virt_read()
            ENDDO
            !
         ELSE
-           CALL calbec(npw_k(1),vkb,evc_all(:,:,1),becp1_all)
+           CALL calbec(ngk(1),vkb,evc_all(:,:,1),becp1_all)
            becp%r=becp1_all
-           CALL s_psi(npwx, npw_k(1), nbnd, evc_all(:,:,1), sevc_all(:,:,1))
+           CALL s_psi(npwx, ngk(1), nbnd, evc_all(:,:,1), sevc_all(:,:,1))
         ENDIF
         !
      ELSE
@@ -416,10 +414,10 @@ SUBROUTINE virt_read()
         !
         DO ik = 1, nks
            !
-           CALL init_us_2(npw_k(ik),igk_k(1,ik),xk(1,ik),vkb)
-           CALL calbec(npw_k(ik),vkb,evc_all(:,:,ik),becp1_c_all(:,:,ik),nbnd)
+           CALL init_us_2(ngk(ik),igk_k(1,ik),xk(1,ik),vkb)
+           CALL calbec(ngk(ik),vkb,evc_all(:,:,ik),becp1_c_all(:,:,ik),nbnd)
            becp%k=becp1_c_all(:,:,ik)
-           CALL s_psi (npwx, npw_k(ik), nbnd, evc_all(:,:,ik), sevc_all(:,:,ik))
+           CALL s_psi (npwx, ngk(ik), nbnd, evc_all(:,:,ik), sevc_all(:,:,ik))
            !     
         ENDDO
         !
@@ -440,6 +438,8 @@ SUBROUTINE virt_read()
   !
   nbnd = nbnd_occ(1)
   !
+  nwordwfc = nbnd * npwx * npol ! needed for EXX
+  !
   CALL deallocate_bec_type(becp)
   CALL allocate_bec_type ( nkb, nbnd, becp )
   !
@@ -449,7 +449,7 @@ SUBROUTINE virt_read()
      !
      DO ibnd=1,nbnd,2
         IF (ibnd<nbnd) THEN
-           DO ig=1,npw_k(1)
+           DO ig=1,ngk(1)
               !
               revc_all(nls(igk_k(ig,1)),ibnd,1) = evc_all(ig,ibnd,1)&
                                     &+(0.0d0,1.0d0)*evc_all(ig,ibnd+1,1)
@@ -459,7 +459,7 @@ SUBROUTINE virt_read()
               !
            ENDDO
         ELSE
-           DO ig=1,npw_k(1)
+           DO ig=1,ngk(1)
               !
               revc_all(nls(igk_k(ig,1)),ibnd,1) = evc_all(ig,ibnd,1)
               revc_all(nlsm(igk_k(ig,1)),ibnd,1) = CONJG(evc_all(ig,ibnd,1))
@@ -477,7 +477,7 @@ SUBROUTINE virt_read()
      !
      DO ik=1,nks
         DO ibnd=1,nbnd
-           DO ig=1,npw_k(ik)
+           DO ig=1,ngk(ik)
               !
               revc_all(nls(igk_k(ig,ik)),ibnd,ik) = evc_all(ig,ibnd,ik)
               !

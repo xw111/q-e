@@ -5,7 +5,6 @@
 ! in the root directory of the present distribution,
 ! or http://www.gnu.org/copyleft/gpl.txt .
 !
-
 !------------------------------------------------------------------------------!
   MODULE cell_base
 !------------------------------------------------------------------------------!
@@ -201,38 +200,14 @@
      CALL volume( alat, at(1,1), at(1,2), at(1,3), omega )
      !
   ELSE
-  ! ... crystal lattice via celldm or crystallographica parameters
-  !
+     !
+     ! ... crystal lattice vectors via ibrav + celldm parameters
+     !
      IF ( celldm(1) == 0.D0 .and. a /= 0.D0 ) THEN
         !
-        celldm(1) = a / bohr_radius_angs
-        celldm(2) = b / a
-        celldm(3) = c / a
-        IF ( (ABS(cosab) > 1.0_dp) .OR. (ABS(cosac) > 1.0_dp) .OR. &
-             (ABS(cosbc) > 1.0_dp) ) CALL errore ('cell_base_init',&
-                         'incorrect values for cosab, cosac, cosbc',1)
+        ! ... convert crystallographic parameters into celldm parameters
         !
-        IF ( ibrav == 14 ) THEN
-           !
-           ! ... triclinic lattice
-           !
-           celldm(4) = cosbc
-           celldm(5) = cosac
-           celldm(6) = cosab
-           !
-        ELSE IF ( ibrav ==-12 ) THEN
-           !
-           ! ... monoclinic P lattice, unique axis b
-           !
-           celldm(5) = cosac
-           !
-        ELSE
-           !
-           ! ... trigonal and monoclinic lattices, unique axis c
-           !
-           celldm(4) = cosab
-           !
-        ENDIF
+        CALL abc2celldm ( ibrav, a,b,c,cosab,cosac,cosbc, celldm )
         !
      ELSE IF ( celldm(1) /= 0.D0 .and. a /= 0.D0 ) THEN
         !
@@ -262,13 +237,12 @@
   !
   END SUBROUTINE cell_base_init
   !
-  SUBROUTINE ref_cell_base_init( ref_cell, ref_alat, rd_ref_ht, ref_cell_units )
+  SUBROUTINE ref_cell_base_init( ref_alat, rd_ref_ht, ref_cell_units )
       !
       ! ... initialize cell_base module variables, set up crystal lattice
       !
 
       IMPLICIT NONE
-      LOGICAL, INTENT(IN) :: ref_cell
       REAL(DP), INTENT(IN) :: rd_ref_ht (3,3)
       REAL(DP), INTENT(INOUT) :: ref_alat
       CHARACTER(LEN=*), INTENT(IN) :: ref_cell_units
@@ -497,6 +471,7 @@
 !
 
       SUBROUTINE gethinv(box)
+        USE matrix_inversion
         IMPLICIT NONE
         TYPE (boxdimensions), INTENT (INOUT) :: box
         !
@@ -535,32 +510,6 @@
           rout = rout + matmul(box%hmat(:,:),s)
         END IF
       END FUNCTION pbc
-
-!
-!------------------------------------------------------------------------------!
-!
-      FUNCTION saw(emaxpos,eopreg,x) RESULT (sawout)
-        IMPLICIT NONE
-        REAL(DP) :: emaxpos,eopreg,x
-        REAL(DP) :: y, sawout, z
-        
-        z = x - emaxpos 
-        y = z - floor(z)
-        
-        if (y.le.eopreg) then
-        
-            sawout = (0.5_DP - y/eopreg) * (1._DP-eopreg)
-        
-        else 
-!
-! I would use:   sawout = y - 0.5_DP * ( 1.0_DP + eopreg )
-!
-            sawout = (-0.5_DP + (y-eopreg)/(1._DP-eopreg)) * (1._DP-eopreg)
-        
-        end if
-        
-      END FUNCTION saw
-
 !
 !------------------------------------------------------------------------------!
 !
@@ -666,7 +615,7 @@
     REAL(DP),  INTENT(IN) :: wc_ , frich_ , greash_ , total_ions_mass
     REAL(DP),  INTENT(IN) :: press_ ! external pressure from input 
                                     ! ( in KBar = 0.1 GPa )
-    INTEGER   :: i,j
+    INTEGER   :: j
     !
     press  = press_ / 10.0_DP ! convert press in KBar to GPa
     press  = press  / au_gpa  ! convert to AU
@@ -1003,7 +952,7 @@
     REAL(DP), intent(in) :: omega, press
     REAL(DP), intent(in), optional :: wmassIN
     integer        :: i, j
-    REAL(DP) :: wmass
+    REAL(DP) :: wmass, fiso
     IF (.not. present(wmassIN)) THEN
       wmass = 1.0
     ELSE
@@ -1022,6 +971,17 @@
     IF( wmass < eps8 ) &
        CALL errore( ' movecell ',' cell mass is less than 0 ! ', 1 )
     fcell = omega * fcell / wmass
+! added this :
+    IF( isotropic ) THEN
+      !
+      ! Isotropic force on the cell
+      !
+      fiso = (fcell(1,1)+fcell(2,2)+fcell(3,3))/3.0_DP
+      do i=1,3
+          fcell(i,i)=fiso
+      end do
+    END IF
+! 
     return
   end subroutine cell_force
 

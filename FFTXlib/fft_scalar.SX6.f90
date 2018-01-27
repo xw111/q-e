@@ -5,33 +5,18 @@
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
 ! or http://www.gnu.org/copyleft/gpl.txt .
-!
-!--------------------------------------------------------------------------!
-! FFT scalar drivers Module - contains machine-dependent routines for      !
-! FFTW, FFTW3, ESSL (both 3d for serial execution and 1d+2d FFTs for       !
-! parallel execution; NEC ASL libraries (3d only, no parallel execution)   !
-! Written by Carlo Cavazzoni, modified by P. Giannozzi, contributions      !
-! by Martin Hilgemans, Guido Roma, Pascal Thibaudeau, Stephane Lefranc,    !
-! Nicolas Lacorne, Filippo Spiga, Nicola Varini - Last update Jul 2015     !
-!--------------------------------------------------------------------------!
-
-#if defined(__SX6)
 
 !=----------------------------------------------------------------------=!
-   MODULE fft_scalar
+   MODULE fft_scalar_sx6
 !=----------------------------------------------------------------------=!
 
-       USE, intrinsic ::  iso_c_binding
+     USE fft_param
        
-       IMPLICIT NONE
-        SAVE
-
+     IMPLICIT NONE
+     SAVE
+#if defined(__SX6)
         PRIVATE
         PUBLIC :: cft_1z, cft_2xy, cfft3d, cfft3ds
-
-! ...   Local Parameter
-
-#include "fft_param.f90"
 
 !=----------------------------------------------------------------------=!
    CONTAINS
@@ -78,7 +63,7 @@
      !   ltabl   Dimension of the tables of factors calculated at the
      !           initialization stage
 
-#if defined(__OPENMP)
+#if defined(_OPENMP)
      INTEGER :: offset, ldz_t
      INTEGER :: omp_get_max_threads
      EXTERNAL :: omp_get_max_threads
@@ -191,7 +176,7 @@
      LOGICAL :: dofft( nfftx ), done
      INTEGER, PARAMETER  :: stdout = 6
 
-#if defined(__OPENMP)
+#if defined(_OPENMP)
      INTEGER :: offset
      INTEGER :: nx_t, ny_t, nzl_t, ldx_t, ldy_t
      INTEGER  :: itid, mytid, ntids
@@ -333,7 +318,7 @@
 !=----------------------------------------------------------------------=!
 !
 
-   SUBROUTINE cfft3d( f, nx, ny, nz, ldx, ldy, ldz, isign )
+   SUBROUTINE cfft3d( f, nx, ny, nz, ldx, ldy, ldz, howmany, isign )
 
   !     driver routine for 3d complex fft of lengths nx, ny, nz
   !     input  :  f(ldx*ldy*ldz)  complex, transform is in-place
@@ -348,7 +333,7 @@
 
      IMPLICIT NONE
 
-     INTEGER, INTENT(IN) :: nx, ny, nz, ldx, ldy, ldz, isign
+     INTEGER, INTENT(IN) :: nx, ny, nz, ldx, ldy, ldz, howmany, isign
      COMPLEX (DP) :: f(:)
      INTEGER :: i, k, j, err, idir, ip
      REAL(DP) :: tscale
@@ -369,13 +354,14 @@
      COMMON/NEC_ASL_PARA/nbtasks
 #endif
 
-
      IF ( nx < 1 ) &
          call fftx_error__('cfft3d',' nx is less than 1 ', 1)
      IF ( ny < 1 ) &
          call fftx_error__('cfft3d',' ny is less than 1 ', 1)
      IF ( nz < 1 ) &
-         call fftx_error__('cfft3',' nz is less than 1 ', 1)
+         call fftx_error__('cfft3d',' nz is less than 1 ', 1)
+     IF ( howmany /= 1 ) &
+         call fftx_error__('cfft3d',' homany different from 1, not yet implemented for SX6 ', 1)
 
 #if defined(ASL)
        ALLOCATE (cw2(ldx*ldy*ldz))
@@ -485,13 +471,13 @@
 !=----------------------------------------------------------------------=!
 !
 
-SUBROUTINE cfft3ds (f, nx, ny, nz, ldx, ldy, ldz, isign, &
-     do_fft_x, do_fft_y)
+SUBROUTINE cfft3ds (f, nx, ny, nz, ldx, ldy, ldz, howmany, isign, &
+     do_fft_z, do_fft_y)
   !
   !     driver routine for 3d complex "reduced" fft - see cfft3d
   !     The 3D fft are computed only on lines and planes which have
   !     non zero elements. These lines and planes are defined by
-  !     the two integer vectors do_fft_x(ldy*nz) and do_fft_y(nz)
+  !     the two integer vectors do_fft_y(nx) and do_fft_z(ldx*ny)
   !     (1 = perform fft, 0 = do not perform fft)
   !     This routine is implemented only for fftw, essl, acml
   !     If not implemented, cfft3d is called instead
@@ -500,14 +486,14 @@ SUBROUTINE cfft3ds (f, nx, ny, nz, ldx, ldy, ldz, isign, &
   !
   implicit none
 
-  integer :: nx, ny, nz, ldx, ldy, ldz, isign
+  integer :: nx, ny, nz, ldx, ldy, ldz, howmany, isign
   !
   !   logical dimensions of the fft
   !   physical dimensions of the f array
   !   sign of the transformation
 
   complex(DP) :: f ( ldx * ldy * ldz )
-  integer :: do_fft_x(:), do_fft_y(:)
+  integer :: do_fft_y(:), do_fft_z(:)
   !
   integer :: m, incx1, incx2
   INTEGER :: i, k, j, err, idir, ip,  ii, jj
@@ -515,12 +501,10 @@ SUBROUTINE cfft3ds (f, nx, ny, nz, ldx, ldy, ldz, isign, &
   INTEGER, SAVE :: icurrent = 1
   INTEGER, SAVE :: dims(3,ndims) = -1
 
-  CALL cfft3d (f, nx, ny, nz, ldx, ldy, ldz, isign)
+  CALL cfft3d (f, nx, ny, nz, ldx, ldy, ldz, howmany, isign)
   RETURN
 END SUBROUTINE cfft3ds
-
-!=----------------------------------------------------------------------=!
-   END MODULE fft_scalar
-!=----------------------------------------------------------------------=!
-
 #endif
+!=----------------------------------------------------------------------=!
+END MODULE fft_scalar_sx6
+!=----------------------------------------------------------------------=!

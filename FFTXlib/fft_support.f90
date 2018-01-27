@@ -1,4 +1,4 @@
-!
+
 ! Copyright (C) Quantum ESPRESSO group
 !
 ! This file is distributed under the terms of the
@@ -7,19 +7,13 @@
 ! or http://www.gnu.org/copyleft/gpl.txt .
 !
 
-#include "fft_defs.h"
-
-
 !=----------------------------------------------------------------------=!
    MODULE fft_support
 !=----------------------------------------------------------------------=!
 
-       USE, intrinsic ::  iso_c_binding
-       
+       USE fft_param
        IMPLICIT NONE
        SAVE
-
-       INTEGER, PARAMETER :: DP = selected_real_kind(14,200)
 
        PRIVATE
        PUBLIC :: good_fft_dimension, allowed, good_fft_order
@@ -45,7 +39,7 @@ integer function good_fft_dimension (n)
   ! this is the default: max dimension = fft dimension
   nx = n
   !
-#if defined(__ESSL) || defined(__LINUX_ESSL)
+#if defined(__LINUX_ESSL)
   log2n = LOG ( dble (n) ) / LOG ( 2.0_DP )
   ! log2n is the logarithm of n in base 2
   IF ( ABS (NINT(log2n) - log2n) < 1.0d-8 ) nx = n + 1
@@ -106,7 +100,7 @@ function allowed (nr)
 
   else
 
-#if defined(__ESSL) || defined(__LINUX_ESSL)
+#if defined(__LINUX_ESSL)
 
      ! IBM machines with essl libraries
 
@@ -144,10 +138,7 @@ end function allowed
 !         an fft order is not good if not implemented (as on IBM with ESSL)
 !         or implemented but with awful performances (most other cases)
 !
-
-
      IMPLICIT NONE
-#include "fft_param.f90"
      INTEGER, INTENT(IN) :: nr
      INTEGER, OPTIONAL, INTENT(IN) :: np
      INTEGER :: new

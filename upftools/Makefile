@@ -1,12 +1,12 @@
 # Makefile for converters to UPF format
 
-include ../make.sys
+include ../make.inc
 
 # location of needed modules
-MODFLAGS= $(MOD_FLAG)../iotk/src $(MOD_FLAG)../Modules $(MOD_FLAG)../FFTXlib $(MOD_FLAG).
+MODFLAGS= $(MOD_FLAG)../iotk/src $(MOD_FLAG)../Modules $(MOD_FLAG)../FFTXlib $(MOD_FLAG)../LAXlib $(MOD_FLAG)../UtilXlib $(MOD_FLAG).
 
-OBJS = write_upf.o
-QEMODS = ../Modules/libqemod.a ../FFTXlib/libqefft.a
+OBJS = write_upf.o read_upf.o
+QEMODS = ../Modules/libqemod.a ../FFTXlib/libqefft.a ../UtilXlib/libutil.a
 
 TLDEPS = mods libs libiotk
 
@@ -35,10 +35,10 @@ ncpp2upf.x : ncpp2upf.o $(OBJS) $(QEMODS) $(LIBOBJS)
 oldcp2upf.x : oldcp2upf.o $(OBJS) $(QEMODS) $(LIBOBJS)
 	$(LD) $(LDFLAGS) -o $@ oldcp2upf.o $(OBJS) $(QEMODS) $(LIBOBJS) $(LIBS)
 
-read_upf.x : read_upf.o
-	$(LD) $(LDFLAGS) -o $@ read_upf.o $(LIBS)
+read_upf.x : read_ps.o
+	$(LD) $(LDFLAGS) -o $@ read_ps.o $(OBJS)
 
-read_upf_tofile.x : read_upf_tofile.o $(QEMODS) 
+read_upf_tofile.x : read_upf_tofile.o $(OBJS) $(QEMODS) $(LIBOBJS)
 	$(LD) $(LDFLAGS) -o $@ read_upf_tofile.o $(OBJS) $(QEMODS) $(LIBOBJS) $(LIBS)
 
 rrkj2upf.x : rrkj2upf.o $(OBJS) $(QEMODS) $(LIBOBJS)
@@ -68,6 +68,6 @@ tldeps:
 	( cd ../ ; $(MAKE) $(TLDEPS) || exit 1 ) ; fi
 
 clean :
-	- /bin/rm -f  *.x *.o *~ *.F90 *.mod *.d *.i *.L
+	- /bin/rm -f  *.x *.o *~ *_tmp.f90 *.mod *.d *.i *.L
 
 include make.depend

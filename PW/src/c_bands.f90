@@ -17,12 +17,12 @@ SUBROUTINE c_bands( iter )
   !
   USE kinds,                ONLY : DP
   USE io_global,            ONLY : stdout
-  USE io_files,             ONLY : iunigk, iunhub, iunwfc, nwordwfc, nwordwfcU
+  USE io_files,             ONLY : iunhub, iunwfc, nwordwfc, nwordwfcU
   USE buffers,              ONLY : get_buffer, save_buffer, close_buffer
-  USE klist,                ONLY : nkstot, nks, xk, ngk
+  USE klist,                ONLY : nkstot, nks, xk, ngk, igk_k
   USE uspp,                 ONLY : vkb, nkb
   USE gvect,                ONLY : g
-  USE wvfct,                ONLY : et, nbnd, npwx, igk, npw, current_k
+  USE wvfct,                ONLY : et, nbnd, npwx, current_k
   USE control_flags,        ONLY : ethr, isolve, restart
   USE ldaU,                 ONLY : lda_plus_u, U_projection, wfcU
   USE lsda_mod,             ONLY : current_spin, lsda, isk
@@ -44,12 +44,23 @@ SUBROUTINE c_bands( iter )
   ! ik : counter on k points
   ! ik_: k-point already done in a previous run
   LOGICAL :: exst
+!------------------------------------------------------------------------
+
   !
-  CALL start_clock( 'c_bands' )
+  CALL start_clock( 'c_bands' ); !write (*,*) 'start c_bands' ; FLUSH(6)
   !
   ik_ = 0
   avg_iter = 0.D0
   IF ( restart ) CALL restart_in_cbands(ik_, ethr, avg_iter, et )
+  !
+  ! ... If restarting, calculated wavefunctions have to be read from file
+  ! ... (not needed for a single k-point: this is done in wfcinit, 
+  ! ...  directly from file, in order to avoid wasting memory)
+  !
+  DO ik = 1, ik_
+     IF ( nks > 1 .OR. lelfield ) &
+        CALL get_buffer ( evc, nwordwfc, iunwfc, ik )
+  END DO
   !
   IF ( isolve == 0 ) THEN
      WRITE( stdout, '(5X,"Davidson diagonalization with overlap")' )
@@ -59,39 +70,19 @@ SUBROUTINE c_bands( iter )
      CALL errore ( 'c_bands', 'invalid type of diagonalization', isolve)
   END IF
   !
-  if ( nks > 1 ) REWIND( iunigk )
-  !
   ! ... For each k point diagonalizes the hamiltonian
   !
-  k_loop: DO ik = 1, nks
+  k_loop: DO ik = ik_+1, nks
+     !
+     ! ... Set k-point, spin, kinetic energy, needed by Hpsi
      !
      current_k = ik
      IF ( lsda ) current_spin = isk(ik)
-     npw = ngk(ik)
-     !
-     ! ... Reads the list of indices k+G <-> G of this k point
-     !
-     IF ( nks > 1 ) READ( iunigk ) igk
-     !
-     ! ... Dirty restart trick: iunigk is sequential so it has to be read
-     ! ... for all k-points, or else the wrong igk would be read.
-     ! ... Calculated wavefunctions have to be read from buffer.
-     ! ... (not for a single k-point: this is done in wfcinit, 
-     ! ...  directly from file, in order to avoid wasting memory)
-     !
-     IF ( ik < ik_+1 ) THEN
-        IF ( nks > 1 .OR. lelfield ) &
-           CALL get_buffer ( evc, nwordwfc, iunwfc, ik )
-        CYCLE k_loop
-     END IF
-     !
-     ! ... various initializations
-     !
-     IF ( nkb > 0 ) CALL init_us_2( npw, igk, xk(1,ik), vkb )
-     !
-     ! ... kinetic energy
-     !
      call g2_kin( ik )
+     !
+     ! ... More stuff needed by the hamiltonian: nonlocal projectors
+     !
+     IF ( nkb > 0 ) CALL init_us_2( ngk(ik), igk_k(1,ik), xk(1,ik), vkb )
      !
      ! ... read in wavefunctions from the previous iteration
      !
@@ -136,7 +127,7 @@ SUBROUTINE c_bands( iter )
        '( 5X,"ethr = ",1PE9.2,",  avg # of iterations =",0PF5.1 )' ) &
        ethr, avg_iter
   !
-  CALL stop_clock( 'c_bands' )
+  CALL stop_clock( 'c_bands' ); !write (*,*) 'stop c_bands' ; FLUSH(6)
   !
   RETURN
   !
@@ -166,8 +157,7 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
   USE io_files,             ONLY : nwordwfc, iunefieldp, iunefieldm
   USE uspp,                 ONLY : vkb, nkb, okvan
   USE gvect,                ONLY : gstart
-  USE wvfct,                ONLY : g2kin, nbndx, et, nbnd, npwx, npw, &
-       current_k, btype
+  USE wvfct,                ONLY : g2kin, nbndx, et, nbnd, npwx, btype
   USE control_flags,        ONLY : ethr, lscf, max_cg_iter, isolve, &
                                    gamma_only, use_para_diag
   USE noncollin_module,     ONLY : noncolin, npol
@@ -178,9 +168,9 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
                                    gdir, l3dstring, efield, efield_cry
   USE becmod,               ONLY : bec_type, becp, calbec, &
                                    allocate_bec_type, deallocate_bec_type
-  USE klist,                ONLY : nks
+  USE klist,                ONLY : nks, ngk
   USE mp_bands,             ONLY : nproc_bgrp, intra_bgrp_comm, inter_bgrp_comm, &
-                                   set_bgrp_indices, my_bgrp_id, root_bgrp, nbgrp
+                                   set_bgrp_indices, my_bgrp_id, nbgrp
   USE mp,                   ONLY : mp_sum, mp_bcast
   !
   IMPLICIT NONE
@@ -191,7 +181,7 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
   !
   REAL (KIND=DP) :: cg_iter
   ! (weighted) number of iterations in Conjugate-Gradient
-  INTEGER :: ig, dav_iter, ntry, notconv
+  INTEGER :: npw, ig, dav_iter, ntry, notconv
   ! number of iterations in Davidson
   ! number or repeated call to diagonalization in case of non convergence
   ! number of notconverged elements
@@ -200,6 +190,18 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
   LOGICAL :: lrot
   ! .TRUE. if the wfc have already be rotated
   !
+! Davidson diagonalization uses these external routines on groups of nvec bands
+  external h_psi, s_psi, g_psi
+! subroutine h_psi(npwx,npw,nvec,psi,hpsi)  computes H*psi
+! subroutine s_psi(npwx,npw,nvec,psi,spsi)  computes S*psi (if needed)
+! subroutine g_psi(npwx,npw,nvec,psi,eig)   computes G*psi -> psi
+!------------------------------------------------------------------------
+! CG diagonalization uses these external routines on a single band
+   external h_1psi, s_1psi
+!  subroutine h_1psi(npwx,npw,psi,hpsi,spsi)  computes H*psi and S*psi
+!  subroutine s_1psi(npwx,npw,psi,spsi)  computes S*psi (if needed)
+! In addition to the above ithe initial wfc rotation uses h_psi, and s_psi
+
   ALLOCATE( h_diag( npwx, npol ), STAT=ierr )
   IF( ierr /= 0 ) &
      CALL errore( ' diag_bands ', ' cannot allocate h_diag ', ABS(ierr) )
@@ -208,15 +210,16 @@ SUBROUTINE diag_bands( iter, ik, avg_iter )
   IF( ierr /= 0 ) &
      CALL errore( ' diag_bands ', ' cannot allocate s_diag ', ABS(ierr) )
   !
-  ! ... allocate space for <beta_i|psi_j> - used in h_psi and s_psi
-  !
   ipw=npwx
   CALL mp_sum(ipw, intra_bgrp_comm)
   IF ( nbndx > ipw ) &
      CALL errore ( 'diag_bands', 'too many bands, or too few plane waves',1)
   !
-     CALL allocate_bec_type ( nkb, nbnd, becp, intra_bgrp_comm )
+  ! ... allocate space for <beta_i|psi_j> - used in h_psi and s_psi
   !
+  CALL allocate_bec_type ( nkb, nbnd, becp, intra_bgrp_comm )
+  !
+  npw = ngk(ik)
   IF ( gamma_only ) THEN
      !
      CALL diag_bands_gamma()
@@ -285,8 +288,9 @@ CONTAINS
              !
           END IF
           !
-          CALL rcgdiagg( npwx, npw, nbnd, evc, et(1,ik), btype(1,ik), &
-               h_diag, ethr, max_cg_iter, .NOT. lscf, notconv, cg_iter )
+          CALL rcgdiagg( h_1psi, s_1psi, h_diag, &
+                         npwx, npw, nbnd, evc, et(1,ik), btype(1,ik), &
+                         ethr, max_cg_iter, .NOT. lscf, notconv, cg_iter )
           !
           avg_iter = avg_iter + cg_iter
           !
@@ -308,7 +312,7 @@ CONTAINS
        !
        h_diag(1:npw, 1) = g2kin(1:npw) + v_of_0
        !
-       CALL usnldiag( h_diag, s_diag )
+       CALL usnldiag( npw, h_diag, s_diag )
        !
        ntry = 0
        !
@@ -319,16 +323,15 @@ CONTAINS
           IF ( use_para_diag ) then
              !
 !             ! make sure that all processors have the same wfc
-!             IF ( nbgrp > 1 ) CALL mp_bcast(evc,root_bgrp,inter_bgrp_comm)
-             CALL pregterg( npw, npwx, nbnd, nbndx, evc, ethr, &
-                         okvan, gstart, et(1,ik), btype(1,ik), &
-                         notconv, lrot, dav_iter )
+             CALL pregterg( h_psi, s_psi, okvan, g_psi, &
+                         npw, npwx, nbnd, nbndx, evc, ethr, &
+                         et(1,ik), btype(1,ik), notconv, lrot, dav_iter ) !    BEWARE gstart has been removed from call 
              !
           ELSE
              !
-             CALL regterg ( npw, npwx, nbnd, nbndx, evc, ethr, &
-                         okvan, gstart, et(1,ik), btype(1,ik), &
-                         notconv, lrot, dav_iter )
+             CALL regterg (  h_psi, s_psi, okvan, g_psi, &
+                         npw, npwx, nbnd, nbndx, evc, ethr, &
+                         et(1,ik), btype(1,ik), notconv, lrot, dav_iter ) !    BEWARE gstart has been removed from call
           END IF
           !
           avg_iter = avg_iter + dav_iter
@@ -358,11 +361,10 @@ CONTAINS
     ! ... here the local variables
     !
     INTEGER :: ipol
-    REAL(dp) :: eps
+    REAL(dp) :: eps=0.000001d0
     !  --- Define a small number ---
-    eps=0.000001d0
-
     !
+    !write (*,*) ' enter diag_bands_k'; FLUSH(6)
     IF ( lelfield ) THEN
        !
        ! ... save wave functions from previous iteration for electric field
@@ -394,12 +396,14 @@ CONTAINS
        !
     END IF
     !
+    !write (*,*) ' current isolve value ( 1 CG, 2 Davidson)', isolve; FLUSH(6)
     IF ( isolve == 1 ) THEN
        !
        ! ... Conjugate-Gradient diagonalization
        !
        ! ... h_diag is the precondition matrix
        !
+       !write (*,*) ' inside CG solver branch '
        h_diag = 1.D0
        !
        FORALL( ig = 1 : npwx )
@@ -422,8 +426,9 @@ CONTAINS
              !
           END IF
           !
-          CALL ccgdiagg( npwx, npw, nbnd, npol, evc, et(1,ik), btype(1,ik), &
-               h_diag, ethr, max_cg_iter, .NOT. lscf, notconv, cg_iter )
+          CALL ccgdiagg( h_1psi, s_1psi, h_diag, &
+                         npwx, npw, nbnd, npol, evc, et(1,ik), btype(1,ik), &
+                         ethr, max_cg_iter, .NOT. lscf, notconv, cg_iter )
           !
           avg_iter = avg_iter + cg_iter
           !
@@ -449,7 +454,7 @@ CONTAINS
           !
        END DO
        !
-       CALL usnldiag( h_diag, s_diag )
+       CALL usnldiag( npw, h_diag, s_diag )
        !
        ntry = 0
        !
@@ -459,15 +464,15 @@ CONTAINS
           !
           IF ( use_para_diag ) then
              !
-             CALL pcegterg( npw, npwx, nbnd, nbndx, npol, evc, ethr, &
-                         okvan, et(1,ik), btype(1,ik), &
-                         notconv, lrot, dav_iter )
+             CALL pcegterg( h_psi, s_psi, okvan, g_psi, &
+                            npw, npwx, nbnd, nbndx, npol, evc, ethr, &
+                            et(1,ik), btype(1,ik), notconv, lrot, dav_iter )
              !
           ELSE
              !
-             CALL cegterg ( npw, npwx, nbnd, nbndx, npol, evc, ethr, &
-                         okvan, et(1,ik), btype(1,ik), &
-                         notconv, lrot, dav_iter )
+             CALL cegterg ( h_psi, s_psi, okvan, g_psi, &
+                            npw, npwx, nbnd, nbndx, npol, evc, ethr, &
+                            et(1,ik), btype(1,ik), notconv, lrot, dav_iter )
           END IF
           !
           avg_iter = avg_iter + dav_iter
@@ -582,13 +587,13 @@ SUBROUTINE c_bands_nscf( )
   !
   USE kinds,                ONLY : DP
   USE io_global,            ONLY : stdout
-  USE io_files,             ONLY : iunigk, iunhub, iunwfc, nwordwfc, nwordwfcU
+  USE io_files,             ONLY : iunhub, iunwfc, nwordwfc, nwordwfcU
   USE buffers,              ONLY : get_buffer, save_buffer, close_buffer
   USE basis,                ONLY : starting_wfc
-  USE klist,                ONLY : nkstot, nks, xk, ngk
+  USE klist,                ONLY : nkstot, nks, xk, ngk, igk_k
   USE uspp,                 ONLY : vkb, nkb
   USE gvect,                ONLY : g
-  USE wvfct,                ONLY : et, nbnd, npwx, igk, npw, current_k
+  USE wvfct,                ONLY : et, nbnd, npwx, current_k
   USE control_flags,        ONLY : ethr, restart, isolve, io_level, iverbosity
   USE ldaU,                 ONLY : lda_plus_u, U_projection, wfcU
   USE lsda_mod,             ONLY : current_spin, lsda, isk
@@ -614,6 +619,12 @@ SUBROUTINE c_bands_nscf( )
   avg_iter = 0.D0
   IF ( restart ) CALL restart_in_cbands(ik_, ethr, avg_iter, et )
   !
+  ! ... If restarting, calculated wavefunctions have to be read from file
+  !
+  DO ik = 1, ik_
+     CALL get_buffer ( evc, nwordwfc, iunwfc, ik )
+  END DO
+  !
   IF ( isolve == 0 ) THEN
      WRITE( stdout, '(5X,"Davidson diagonalization with overlap")' )
   ELSE IF ( isolve == 1 ) THEN
@@ -622,39 +633,20 @@ SUBROUTINE c_bands_nscf( )
      CALL errore ( 'c_bands', 'invalid type of diagonalization', isolve)
   END IF
   !
-  if ( nks > 1 ) REWIND( iunigk )
-  !
   ! ... For each k point (except those already calculated if restarting)
   ! ... diagonalizes the hamiltonian
   !
-  k_loop: DO ik = 1, nks
+  k_loop: DO ik = ik_+1, nks
+     !
+     ! ... Set k-point, spin, kinetic energy, needed by Hpsi
      !
      current_k = ik
      IF ( lsda ) current_spin = isk(ik)
-     npw = ngk(ik)
-     !
-     ! ... Reads the list of indices k+G <-> G of this k point
-     !
-     IF ( nks > 1 ) READ( iunigk ) igk
-     !
-     ! ... Dirty restart trick: iunigk is sequential so it has to be read
-     ! ... for all k-points, or else the wrong igk would be read.
-     ! ... Calculated wavefunctions have to be read from buffer.
-     !
-     IF ( ik < ik_+1 ) THEN
-        CALL get_buffer ( evc, nwordwfc, iunwfc, ik )
-        CYCLE k_loop
-     END IF
-     !
-     IF ( iverbosity > 0 ) WRITE( stdout, 9001 ) ik
-     !
-     ! ... various initializations
-     !
-     IF ( nkb > 0 ) CALL init_us_2( npw, igk, xk(1,ik), vkb )
-     !
-     ! ... kinetic energy
-     !
      call g2_kin( ik )
+     ! 
+     ! ... More stuff needed by the hamiltonian: nonlocal projectors
+     !
+     IF ( nkb > 0 ) CALL init_us_2( ngk(ik), igk_k(1,ik), xk(1,ik), vkb )
      !
      ! ... Needed for LDA+U
      !
@@ -662,6 +654,8 @@ SUBROUTINE c_bands_nscf( )
           CALL get_buffer ( wfcU, nwordwfcU, iunhub, ik )
      !
      ! ... calculate starting  wavefunctions
+     !
+     IF ( iverbosity > 0 ) WRITE( stdout, 9001 ) ik
      !
      IF ( TRIM(starting_wfc) == 'file' ) THEN
         !

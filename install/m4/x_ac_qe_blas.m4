@@ -10,25 +10,17 @@ have_atlas=0
 have_essl=0
 have_mkl=0
   
-AC_ARG_WITH(internal-blas,
-  [AS_HELP_STRING([--with-internal-blas],
-      [compile with internal blas (default: no)])],
-   [if   test "$withval" = "yes" ; then
-     use_internal_blas=1
-  else
-     use_internal_blas=0
-  fi],
-  [use_internal_blas=0])
-   
-# check for blas
-# supported vendor replacements:
-#   mkl and acml on Intel/AMD architectures
-#   essl on aix
-#   SUNperf on sparc
-# atlas is used over blas if available
-# internal version is used if none is found
+AC_ARG_WITH(netlib,
+   [AS_HELP_STRING([--with-netlib],
+       [compile with Netlib LAPACK and BLAS (default: no)])],
+    [if test "$withval" = "yes" ; then
+      use_netlib=1
+   else
+      use_netlib=0
+   fi],
+   [use_netlib=0])
 
-if test "$use_internal_blas" -eq 0
+if test "$use_netlib" -eq 0
 then
    if test "$blas_libs" = ""
    then
@@ -89,7 +81,7 @@ then
                         # Check first MKL...
                         FFLAGS="$test_fflags"
                         LDFLAGS="$MKL_FLAGS $test_ldflags $try_loption"
-                        LIBS="$MKL_LIBS"
+                        LIBS=""
 
                         if test "$use_openmp" -eq 0; then
                               AC_SEARCH_LIBS(dgemm, mkl_intel_lp64,
@@ -160,12 +152,12 @@ then
                         fi
                         FFLAGS="$test_fflags"
                         LDFLAGS="$MKL_FLAGS $test_ldflags $try_loption"
-                        LIBS="$MKL_LIBS"
+                        LIBS=""
                         #
                         # should work for recent MKL versions only
                         #
                         if test "$use_openmp" -eq 0; then
-                           if test "$f90" = "g95" -o "$f90" = "gfortran" ; then
+                           if test "$f90" = "gfortran" ; then
      			      AC_SEARCH_LIBS(dgemm, mkl_gf_ipf, 
                                  have_blas=1 have_mkl=1 
                                  blas_libs="$try_loption $LIBS -lmkl_sequential -lmkl_core"
@@ -181,7 +173,7 @@ then
                                  -lmkl_sequential -lmkl_core)
 			   fi
                         else
-                           if test "$f90" = "g95" -o"$f90" = "gfortran"; then
+                           if test "$f90" = "gfortran"; then
      			      AC_SEARCH_LIBS(dgemm, mkl_gf_ipf, 
                                  have_blas=1 have_mkl=1 
                                  blas_libs="$try_loption $LIBS -lmkl_gnu_thread -lmkl_core"
@@ -197,36 +189,6 @@ then
                                  -lmkl_sequential -lmkl_core)
 			   fi
                         fi
-                        if test "$ac_cv_search_dgemm" != "no"
-                        then break ; fi
-                done
-                ;;
-
-        *:sunf95 )
-                # check for acml - note that it contains lapack as well
-                if test "$arch" = "x86_64"
-                then
-                        try_libdirs="/usr/local/sunstudio*/lib/amd64/"
-                else
-                        try_libdirs="/usr/local/sunstudio*/lib/"
-                fi
-                try_libdirs="$libdirs $ld_library_path $try_libdirs"
-
-                for dir in none $try_libdirs
-                do
-                        unset ac_cv_search_dgemm # clear cached value
-                        if test "$dir" = "none"
-                        then
-                                try_loption=
-                        else
-                                echo $ECHO_N "in $dir: " $ECHO_C
-                                try_loption="-L$dir"
-                        fi
-                        FFLAGS="$test_fflags"
-                        LDFLAGS="$test_ldflags $try_loption"
-                        LIBS=""
-                        AC_SEARCH_LIBS(dgemm, sunperf, have_blas=1 have_lapack=1
-                                blas_libs="$try_loption $LIBS")
                         if test "$ac_cv_search_dgemm" != "no"
                         then break ; fi
                 done
@@ -252,12 +214,12 @@ then
                         fi
                         FFLAGS="$test_fflags"
                         LDFLAGS="$MKL_FLAGS $test_ldflags $try_loption"
-                        LIBS="$MKL_LIBS"
+                        LIBS=""
                         #
                         # should work for recent MKL versions only
                         #
                         if test "$use_openmp" -eq 0; then
-                           if test "$f90" = "g95" -o "$f90" = "gfortran" ; then
+                           if test "$f90" = "gfortran" ; then
      			      AC_SEARCH_LIBS(dgemm, mkl_gf_lp64, 
                                  have_blas=1 have_mkl=1 
                                  blas_libs="$try_loption $LIBS -lmkl_sequential -lmkl_core"
@@ -273,7 +235,7 @@ then
                                  -lmkl_sequential -lmkl_core)
 			   fi
                         else
-                           if test "$f90" = "g95" -o "$f90" = "gfortran" ; then
+                           if test "$f90" = "gfortran" ; then
      			      AC_SEARCH_LIBS(dgemm, mkl_gf_lp64, 
                                  have_blas=1 have_mkl=1 
                                  blas_libs="$try_loption $LIBS -lmkl_gnu_thread -lmkl_core"
@@ -315,12 +277,12 @@ then
                         fi
                         FFLAGS="$test_fflags"
                         LDFLAGS="$MKL_FLAGS $test_ldflags $try_loption"
-                        LIBS="$MKL_LIBS"
+                        LIBS=""
                         #
                         # should work for recent MKL versions only
                         #
                         if test "$use_openmp" -eq 0; then
-                           if test "$f90" = "g95" -o "$f90" = "gfortran"; then
+                           if test "$f90" = "gfortran"; then
      			      AC_SEARCH_LIBS(dgemm, mkl_gf, 
                                  have_blas=1 have_mkl=1 
                                  blas_libs="$try_loption $LIBS -lmkl_sequential -lmkl_core"
@@ -336,7 +298,7 @@ then
                                  -lmkl_sequential -lmkl_core)
 			   fi
                         else
-                           if test "$f90" = "g95" -o "$f90" = "gfortran" ; then
+                           if test "$f90" = "gfortran" ; then
      			      AC_SEARCH_LIBS(dgemm, mkl_gf, 
                                  have_blas=1 have_mkl=1 
                                  blas_libs="$try_loption $LIBS -lmkl_gnu_thread -lmkl_core"
@@ -358,38 +320,6 @@ then
                 done
                 ;;
 
-        aix:* )
-                # check for essl
-                unset ac_cv_search_dgemm # clear cached value
-                FFLAGS="$test_fflags"
-                LDFLAGS="$test_ldflags"
-                LIBS=""
-                AC_SEARCH_LIBS(dgemm, essl, have_blas=1
-                               blas_libs="$LIBS" )
-                # notice that some IBM machines may not need -lessl
-                # to load blas so the above test may fail
-                if test "`echo $blas_libs | grep essl`" != ""
-                then
-                    have_essl=1
-                    try_dflags="$try_dflags -D__ESSL"
-                fi
-		# we need esslsmp for hybrid (MPI+OpenMP) build
-		if test "$have_essl"="1"; then
-		    if test "$use_openmp" -ne 0 ; then
-		         blas_libs="-lesslsmp"
-		    fi
-		fi
-                ;;
-
-        sparc:* | solaris:* )
-                # check for SUNperf library
-                unset ac_cv_search_dgemm # clear cached value
-                FFLAGS="$test_fflags"
-                LDFLAGS="$test_ldflags"
-                LIBS=""
-                AC_SEARCH_LIBS(dgemm, sunperf, have_blas=1 have_lapack=1
-                               blas_libs="-xlic_lib=sunperf $LIBS")
-                ;;
         necsx:* )
                 #sx5-nec or sx6-nec or sx8-nec: check in (/SX)/usr/lib
                 #sx8-nec-idris: check in /SX/opt/mathkeisan/inst/lib0
@@ -488,7 +418,7 @@ then
 			fi
 			FFLAGS="$test_fflags"
 			LDFLAGS="$MKL_FLAGS $test_ldflags $try_loption"
-			LIBS="$MKL_LIBS"
+			LIBS=""
                         # First, a by-the-apple-book search of MKL... >10.2 requires multiple libraries
                         # 64 bit is buggy as of 11.1.088
                         if test "$use_openmp" -eq 0; then
@@ -588,40 +518,11 @@ then
    fi
 fi
 
-# no blas library found, or internal blas required: use the built-in blas
-# (blas_libs is used in the above lapack tests: do not move the following
-# settings above lapack tests, which would seem a more logical place)
-
-if test "$have_blas" -eq 0 -o "$use_internal_blas" -eq 1 ; then
-    blas_libs="$topdir/BLAS/blas.a"
-    blas_libs_switch="internal"
-else
-    blas_libs_switch="external"
-fi
-
-# Internal BLAS/LAPACK sometimes have to be handled differently...
-if test "$extlib_flags" = "" ; then
-  case "$arch:$f90_version" in
-  x86_64:nagfor* )
-    extlib_flags="-O2 -kind=byte -dcfuns -mismatch"
-    ;;
-  ppc64:* )
-    extlib_flags="-q64 -qthreaded"
-    ;;
-  * )
-    extlib_flags="-O2"
-  ;;
-  esac
-fi
-
 blas_line="BLAS_LIBS=$blas_libs" 
 echo setting BLAS_LIBS... $blas_libs
   
 AC_SUBST(blas_libs)
-AC_SUBST(blas_libs_switch)
 AC_SUBST(blas_line)
-  
-AC_CONFIG_FILES(install/make_blas.inc)
   
 ]
 )

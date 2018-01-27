@@ -596,7 +596,7 @@
       use uspp_param, only: lmaxkb, ish, nvb
       USE atom,       ONLY: rgrid
       USE uspp,       ONLY: indv
-      use uspp,       only: qq, beta
+      use uspp,       only: qq_nt, beta
       USE betax,      only: refg, qradx, mmx, dqradx
       use smallbox_gvec,      only: ngb
       use control_flags, only: iprint, iverbosity
@@ -772,8 +772,8 @@
                ijv = jv*(jv-1)/2 + iv
                call qvan2b(ngb,iv,jv,is,ylmb,qgb(1,ijv,is),qradb )
 !
-               qq(iv,jv,is)=omegab*DBLE(qgb(1,ijv,is))
-               qq(jv,iv,is)=qq(iv,jv,is)
+               qq_nt(iv,jv,is)=omegab*DBLE(qgb(1,ijv,is))
+               qq_nt(jv,iv,is)=qq_nt(iv,jv,is)
 !
             end do
          end do
@@ -917,7 +917,7 @@
       USE ions_base, only: nsp
       USE gvect, only: gg, g, gstart
       USE uspp_param, only: upf, lmaxq, lmaxkb, nh
-      USE uspp, only: qq, nhtolm, beta, dbeta
+      USE uspp, only: qq_nt, nhtolm, beta, dbeta
       USE cell_base, only: ainv, omega, tpiba2, tpiba
       USE betax, ONLY : refg, betagx, dbetagx
 
@@ -1018,7 +1018,7 @@
       use io_global, only: stdout
       use gvecw, only: ngw
       use cell_base, only: ainv
-      use uspp, only: qq, nhtolm, beta
+      use uspp, only: qq_nt, nhtolm, beta
       use constants, only: pi, fpi
       use ions_base, only: nsp
       use uspp_param, only: upf, lmaxq, lmaxkb, nbetam, nh, nvb
@@ -1098,8 +1098,8 @@
                ijv = jv*(jv-1)/2 + iv
                call qvan2b(ngb,iv,jv,is,ylmb,qgb(1,ijv,is),qradb )
 !
-               qq(iv,jv,is)=omegab*DBLE(qgb(1,ijv,is))
-               qq(jv,iv,is)=qq(iv,jv,is)
+               qq_nt(iv,jv,is)=omegab*DBLE(qgb(1,ijv,is))
+               qq_nt(jv,iv,is)=qq_nt(iv,jv,is)
 !
             end do
          end do
@@ -1198,7 +1198,7 @@
       USE gvecw,         only : ngw
       USE ions_base,     only : nsp
       USE uspp_param,    only : upf, lmaxq, lmaxkb, nh, nhm, oldvan
-      USE uspp,          only : qq, nhtolm, beta, nhtol, indv, dbeta
+      USE uspp,          only : qq_nt, nhtolm, beta, nhtol, indv, dbeta
       USE cell_base,     only : ainv, omega, tpiba2, tpiba
       USE atom,          ONLY : rgrid
       USE gvect, only : gg, g, gstart
@@ -1417,21 +1417,9 @@
 
              do l = lmin, lmax
                do ir = 1, upf(is)%kkbeta
-                  IF( upf(is)%q_with_l ) THEN
-                    ! BEWARE: index l in upf%qfuncl(l) runs from 0 to lmax,
-                    !          not from 1 to lmax+1
+                  IF( upf(is)%tvanp ) THEN
+                    ! BEWARE: index l in upf%qfuncl(l) runs from 0 to lmax, not from 1 to lmax+1
                     qrl(ir,ijv,l)=upf(is)%qfuncl(ir,ijv,l-1)
-                  ELSE
-                    if ( rgrid(is)%r(ir) >= upf(is)%rinner(l) ) then
-                       qrl(ir,ijv,l)=upf(is)%qfunc(ir,ijv)
-                    else
-                       qrl(ir,ijv,l)=upf(is)%qfcoef(1,l,iv,jv)
-                       do i = 2, upf(is)%nqf
-                          qrl(ir,ijv,l)=qrl(ir,ijv,l) +      &
-                              upf(is)%qfcoef(i,l,iv,jv)*rgrid(is)%r(ir)**(2*i-2)
-                       end do
-                       qrl(ir,ijv,l) = qrl(ir,ijv,l) * rgrid(is)%r(ir)**(l+1)
-                    end if
                   ENDIF
                end do
             end do

@@ -1,5 +1,5 @@
 !
-! Copyright (C) 2001-2015 Quantum ESPRESSO group
+! Copyright (C) 2001-2016 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -133,7 +133,7 @@ CONTAINS
     USE kinds,         ONLY : DP
     USE lr_variables,  ONLY : R, nbnd_total, n_ipol, project
     USE wvfct,         ONLY : nbnd
-    USE control_ph,    ONLY : nbnd_occ
+    USE control_lr,    ONLY : nbnd_occ
 
     IMPLICIT NONE
 
@@ -204,7 +204,7 @@ CONTAINS
 
     CALL start_clock( 'post-processing' )
     IF (lr_verbosity > 5) WRITE(stdout,'("<read_wT_beta_gamma_z>")')
-#ifdef __MPI
+#if defined(__MPI)
     IF (ionode) THEN
 #endif
        !
@@ -260,7 +260,7 @@ CONTAINS
        CLOSE(158)
        !
        !print *, "starting broadcast"
-#ifdef __MPI
+#if defined(__MPI)
     ENDIF
     CALL mp_barrier(world_comm)
     CALL mp_bcast (w_T_beta_store(:), ionode_id, world_comm)
@@ -634,16 +634,16 @@ CONTAINS
     USE lsda_mod,                 ONLY : nspin
     USE mp,                       ONLY : mp_sum
     USE mp_global,                ONLY : inter_pool_comm, intra_bgrp_comm
-    USE uspp,                     ONLY : okvan,qq,vkb
+    USE uspp,                     ONLY : okvan,qq_nt,vkb
     USE wvfct,                    ONLY : wg,nbnd,npwx
     USE uspp_param,               ONLY : upf, nh
     USE becmod,                   ONLY : becp,calbec
     USE ions_base,                ONLY : ityp,nat,ntyp=>nsp
-    USE realus,                   ONLY : npw_k,real_space_debug,invfft_orbital_gamma,calbec_rs_gamma
+    USE realus,                   ONLY : real_space_debug,invfft_orbital_gamma,calbec_rs_gamma
     USE gvect,                    ONLY : gstart
-    USE klist,                    ONLY : nks
+    USE klist,                    ONLY : nks, ngk
     USE lr_variables,             ONLY : lr_verbosity, itermax, LR_iteration, LR_polarization, &
-         project,evc0_virt,F,nbnd_total,n_ipol, becp1_virt
+                                         project,evc0_virt,F,nbnd_total,n_ipol, becp1_virt
 
     IMPLICIT NONE
     !
@@ -679,7 +679,7 @@ CONTAINS
              CALL calbec_rs_gamma(ibnd,nbnd,becp%r)
           ENDDO
        ELSE
-          CALL calbec(npw_k(1), vkb, evc1(:,:,1), becp)
+          CALL calbec(ngk(1), vkb, evc1(:,:,1), becp)
        ENDIF
     ENDIF
     !
@@ -715,7 +715,7 @@ CONTAINS
                             !
                             !  <beta_i|beta_i> terms
                             !
-                            scal = scal + qq(ih,ih,np) *1.d0 *  becp%r(ikb,ibnd_occ) * becp1_virt(ikb,ibnd_virt)
+                            scal = scal + qq_nt(ih,ih,np) *1.d0 *  becp%r(ikb,ibnd_occ) * becp1_virt(ikb,ibnd_virt)
                             !
                             ijh = ijh + 1
                             !
@@ -725,7 +725,7 @@ CONTAINS
                                !
                                jkb = ijkb0 + jh
                                !
-                               scal = scal + qq(ih,jh,np) *1.d0  * (becp%r(ikb,ibnd_occ) * becp1_virt(jkb,ibnd_virt)+&
+                               scal = scal + qq_nt(ih,jh,np) *1.d0  * (becp%r(ikb,ibnd_occ) * becp1_virt(jkb,ibnd_virt)+&
                                     becp%r(jkb,ibnd_occ) * becp1_virt(ikb,ibnd_virt))
                                !
                                ijh = ijh + 1
@@ -756,11 +756,11 @@ CONTAINS
           ! US part finished
           !first part
           ! the dot  product <evc1|evc0> taken from lr_dot
-          SSUM=(2.D0*wg(ibnd_occ,1)*DDOT(2*npw_k(1),evc0_virt(:,ibnd_virt,1),1,evc1(:,ibnd_occ,1),1))
+          SSUM=(2.D0*wg(ibnd_occ,1)*DDOT(2*ngk(1),evc0_virt(:,ibnd_virt,1),1,evc1(:,ibnd_occ,1),1))
           IF (gstart==2) SSUM = SSUM - (wg(ibnd_occ,1)*dble(evc1(1,ibnd_occ,1))*dble(evc0_virt(1,ibnd_virt,1)))
           !US contribution
           SSUM=SSUM+scal
-#ifdef __MPI
+#if defined(__MPI)
           CALL mp_sum(SSUM, intra_bgrp_comm)
 #endif
           IF(nspin/=2) SSUM=SSUM/2.0D0
@@ -780,14 +780,14 @@ CONTAINS
     USE lsda_mod,                 ONLY : nspin
     USE mp,                       ONLY : mp_sum
     USE mp_global,                ONLY : inter_pool_comm, intra_bgrp_comm
-    USE uspp,                     ONLY : okvan,qq,vkb
+    USE uspp,                     ONLY : okvan,qq_nt,vkb
     USE wvfct,                    ONLY : wg,nbnd,npwx
     USE uspp_param,               ONLY : upf, nh
     USE becmod,                   ONLY : becp,calbec
     USE ions_base,                ONLY : ityp,nat,ntyp=>nsp
-    USE realus,                   ONLY : npw_k,real_space_debug,invfft_orbital_gamma,calbec_rs_gamma
+    USE realus,                   ONLY : real_space_debug,invfft_orbital_gamma,calbec_rs_gamma
     USE gvect,                    ONLY : gstart
-    USE klist,                    ONLY : nks
+    USE klist,                    ONLY : nks, ngk
     USE lr_variables,             ONLY : lr_verbosity, itermax, LR_iteration, LR_polarization, &
          project,evc0_virt,R,nbnd_total,n_ipol, becp1_virt,d0psi
 
@@ -805,9 +805,9 @@ CONTAINS
        DO ibnd_occ=1,nbnd
           DO ibnd_virt=1,(nbnd_total-nbnd)
              ! the dot  product <evc0|sd0psi> taken from lr_dot
-             SSUM=(2.D0*wg(ibnd_occ,1)*DDOT(2*npw_k(1),evc0_virt(:,ibnd_virt,1),1,d0psi(:,ibnd_occ,1,ipol),1))
+             SSUM=(2.D0*wg(ibnd_occ,1)*DDOT(2*ngk(1),evc0_virt(:,ibnd_virt,1),1,d0psi(:,ibnd_occ,1,ipol),1))
              IF (gstart==2) SSUM = SSUM - (wg(ibnd_occ,1)*dble(d0psi(1,ibnd_occ,1,ipol))*dble(evc0_virt(1,ibnd_virt,1)))
-#ifdef __MPI
+#if defined(__MPI)
              CALL mp_sum(SSUM, intra_bgrp_comm)
 #endif
              IF(nspin/=2) SSUM=SSUM/2.0D0
@@ -878,7 +878,7 @@ CONTAINS
     INTEGER ir,i,j,k
     CALL start_clock( 'post-processing' )
     IF (lr_verbosity > 5) WRITE(stdout,'("<lr_dump_rho_tot_compat1>")')
-#ifdef __MPI
+#if defined(__MPI)
     IF (ionode) THEN
 #endif
        !
@@ -937,7 +937,7 @@ CONTAINS
        DEALLOCATE( rho_sum_resp_y )
        DEALLOCATE( rho_sum_resp_z )
        !
-#ifdef __MPI
+#if defined(__MPI)
     ENDIF
 #endif
     CALL stop_clock( 'post-processing' )
@@ -960,8 +960,8 @@ CONTAINS
                                      nproc_bgrp, intra_bgrp_comm, my_bgrp_id
 
     USE constants,            ONLY : BOHR_RADIUS_ANGS
-    USE fft_base,             ONLY : dfftp !this contains dfftp%npp (number of z planes per processor
-    ! and dfftp%ipp (offset of the first z plane of the processor
+    USE fft_base,             ONLY : dfftp !this contains dfftp%nr3p (number of z planes per processor
+    ! and dfftp%i0r3p (offset of the first z plane of the processor
 
     !
     IMPLICIT NONE
@@ -986,8 +986,8 @@ CONTAINS
     IF (lr_verbosity > 5) WRITE(stdout,'("<lr_dump_rho_tot_cube>")')
     !
     six_count=0
-#ifdef __MPI
-    ALLOCATE( rho_temp(dfftp%npp(1)+1) )
+#if defined(__MPI)
+    ALLOCATE( rho_temp(dfftp%nr3p(1)+1) )
     IF (ionode) THEN
        filename = trim(prefix) // "-" // identifier // "-pol" //trim(int_to_char(LR_polarization))// ".cube"
        WRITE(stdout,'(/5X,"Writing Cube file for response charge density")')
@@ -1056,7 +1056,7 @@ CONTAINS
     !IF (nproc_bgrp > 1) THEN
     ! DO i = 1, nproc_bgrp
     !    !
-    !    kowner( (dfftp%ipp(i)+1):(dfftp%ipp(i)+dfftp%npp(i)) ) = i - 1
+    !    kowner( (dfftp%i0r3p(i)+1):(dfftp%i0r3p(i)+dfftp%nr3p(i)) ) = i - 1
     !    !
     ! END DO
     !ELSE
@@ -1077,13 +1077,13 @@ CONTAINS
              IF( (i-1) == me_bgrp ) THEN
                 !
                 !
-                DO  i3=1, dfftp%npp(i)
+                DO  i3=1, dfftp%nr3p(i)
                    !
                    rho_temp(i3) = rho(i1+(i2-1)*dfftp%nr1x+(i3-1)*ldr)
                    !
                    !
                 ENDDO
-                !print *, "get 1=",rho_plane(1)," 2=",rho_plane(2)," ",dfftp%npp(i),"=",rho_plane(dfftp%npp(i))
+                !print *, "get 1=",rho_plane(1)," 2=",rho_plane(2)," ",dfftp%nr3p(i),"=",rho_plane(dfftp%nr3p(i))
              ENDIF
              !call mp_barrier( world_comm )
              IF ( my_bgrp_id == iopool_id ) &
@@ -1095,8 +1095,8 @@ CONTAINS
              !
              !call mp_barrier( world_comm )
              IF(ionode) THEN
-                rho_plane( (dfftp%ipp(i)+1):(dfftp%ipp(i)+dfftp%npp(i)) ) = rho_temp(1:dfftp%npp(i))
-                !print *, "get (",dfftp%ipp(i)+1,")=",rho_plane(dfftp%ipp(i)+1)," (",dfftp%ipp(i)+dfftp%npp(i),")=",rho_plane(dfftp%ipp(i)+dfftp%npp(i))
+                rho_plane( (dfftp%i0r3p(i)+1):(dfftp%i0r3p(i)+dfftp%nr3p(i)) ) = rho_temp(1:dfftp%nr3p(i))
+                !print *, "get (",dfftp%i0r3p(i)+1,")=",rho_plane(dfftp%i0r3p(i)+1)," (",dfftp%i0r3p(i)+dfftp%nr3p(i),")=",rho_plane(dfftp%i0r3p(i)+dfftp%nr3p(i))
                 !print *, "data of proc ",i," written I2=",i2,"I1=",i1
              ENDIF
           ENDDO
@@ -1210,8 +1210,8 @@ CONTAINS
                                      nproc_bgrp, intra_bgrp_comm, my_bgrp_id
 
     USE constants,            ONLY : BOHR_RADIUS_ANGS
-    USE fft_base,             ONLY : dfftp !this contains dfftp%npp (number of z planes per processor
-    ! and dfftp%ipp (offset of the first z plane of the processor
+    USE fft_base,             ONLY : dfftp !this contains dfftp%nr3p (number of z planes per processor
+    ! and dfftp%i0r3p (offset of the first z plane of the processor
     !
     IMPLICIT NONE
     !
@@ -1234,7 +1234,7 @@ CONTAINS
     IF (lr_verbosity > 5) WRITE(stdout,'("<lr_dump_rho_tot_xyzd>")')
     !
 
-#ifdef __MPI
+#if defined(__MPI)
     !Derived From Modules/xml_io_base.f90
     ALLOCATE( rho_plane( dfftp%nr1*dfftp%nr2 ) )
     ALLOCATE( kowner( dfftp%nr3 ) )
@@ -1277,7 +1277,7 @@ CONTAINS
     IF (nproc_bgrp > 1) THEN
        DO i = 1, nproc_bgrp
           !
-          kowner( (dfftp%ipp(i)+1):(dfftp%ipp(i)+dfftp%npp(i)) ) = i - 1
+          kowner( (dfftp%i0r3p(i)+1):(dfftp%i0r3p(i)+dfftp%nr3p(i)) ) = i - 1
           !
        ENDDO
     ELSE
@@ -1294,7 +1294,7 @@ CONTAINS
           !
           kk = i3
           !
-          IF ( nproc_bgrp > 1 ) kk = i3 - dfftp%ipp(me_bgrp+1)
+          IF ( nproc_bgrp > 1 ) kk = i3 - dfftp%i0r3p(me_bgrp+1)
           !
           DO i2 = 1, dfftp%nr2
              !
@@ -1412,8 +1412,8 @@ CONTAINS
          intra_bgrp_comm, my_bgrp_id
 
     USE constants,            ONLY : BOHR_RADIUS_ANGS
-    USE fft_base,             ONLY : dfftp !this contains dfftp%npp (number of z planes per processor
-    ! and dfftp%ipp (offset of the first z plane of the processor
+    USE fft_base,             ONLY : dfftp !this contains dfftp%nr3p (number of z planes per processor
+    ! and dfftp%i0r3p (offset of the first z plane of the processor
 
 
 
@@ -1438,7 +1438,7 @@ CONTAINS
     six_count=0
     CALL start_clock( 'post-processing' )
     IF (lr_verbosity > 5) WRITE(stdout,'("<lr_dump_rho_tot_xsf>")')
-#ifdef __MPI
+#if defined(__MPI)
     IF (ionode) THEN
        !
        !
@@ -1507,7 +1507,7 @@ CONTAINS
     IF (nproc_bgrp > 1) THEN
        DO i = 1, nproc_bgrp
           !
-          kowner( (dfftp%ipp(i)+1):(dfftp%ipp(i)+dfftp%npp(i)) ) = i - 1
+          kowner( (dfftp%i0r3p(i)+1):(dfftp%i0r3p(i)+dfftp%nr3p(i)) ) = i - 1
           !
        ENDDO
     ELSE
@@ -1524,7 +1524,7 @@ CONTAINS
           !
           kk = i3
           !
-          IF ( nproc_bgrp > 1 ) kk = i3 - dfftp%ipp(me_bgrp+1)
+          IF ( nproc_bgrp > 1 ) kk = i3 - dfftp%i0r3p(me_bgrp+1)
           !
           DO i2 = 1, dfftp%nr2
              !
@@ -1689,7 +1689,7 @@ CONTAINS
     ENDDO
     !
 
-#ifdef __MPI
+#if defined(__MPI)
     IF (ionode) THEN
 #endif
        !
@@ -1716,7 +1716,7 @@ CONTAINS
        CLOSE(158)
        !
        !
-#ifdef __MPI
+#if defined(__MPI)
     ENDIF
     CALL mp_barrier(world_comm)
 #endif

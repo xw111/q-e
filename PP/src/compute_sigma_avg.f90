@@ -14,11 +14,11 @@ SUBROUTINE compute_sigma_avg(sigma_avg,becp_nc,ik,lsigma)
   USE noncollin_module,     ONLY : noncolin, npol
   USE cell_base,            ONLY : alat, at, tpiba, omega
   USE spin_orb,             ONLY : fcoef
-  USE uspp,                 ONLY : nkb,qq,vkb,nhtol,nhtoj,nhtolm,indv
+  USE uspp,                 ONLY : nkb,qq_nt,vkb,nhtol,nhtoj,nhtolm,indv
   USE uspp_param,           ONLY : upf, nh, nhm
-  USE wvfct,                ONLY : nbnd, npwx, npw, igk
+  USE wvfct,                ONLY : nbnd, npwx
   USE wavefunctions_module, ONLY : evc, psic_nc
-  USE klist,                ONLY : nks, xk
+  USE klist,                ONLY : nks, xk, ngk, igk_k
   USE gvect,                ONLY : g,gg
   USE gvecs,                ONLY : nls, nlsm, doublegrid
   USE scf,                  ONLY : rho
@@ -36,10 +36,10 @@ SUBROUTINE compute_sigma_avg(sigma_avg,becp_nc,ik,lsigma)
   COMPLEX(DP) :: becp_nc(nkb,npol,nbnd)
   !
   REAL(kind=DP) :: sigma_avg(4,nbnd)
-  INTEGER :: ik
+  INTEGER, INTENT(in) :: ik
 
   INTEGER :: ibnd, ig, ir, ijkb0, na, np, ih, ikb, jh
-  INTEGER :: ipol, kh, kkb, is1, is2, npwi, npwf
+  INTEGER :: ipol, kh, kkb, is1, is2, npw, npwi, npwf
   INTEGER :: li, mi, lj, mj, mi1, i, j, k, ijk
   REAL(DP) :: magtot1(4), magtot2(4)
   REAL(DP) :: x0, y0, dx, dy, r_cut, r_aux, xx, yy
@@ -86,9 +86,9 @@ SUBROUTINE compute_sigma_avg(sigma_avg,becp_nc,ik,lsigma)
            mj = nhtolm(jh,np) - lj**2
            IF (lj==li.and.mj==mi1) THEN
               IF (mj>mi) THEN
-                 r_aux = qq(ih,jh-1,np)
+                 r_aux = qq_nt(ih,jh-1,np)
               ELSE
-                 r_aux = qq(ih,jh+1,np)
+                 r_aux = qq_nt(ih,jh+1,np)
               ENDIF
               qq_lz(ih,jh,np) = c_aux * r_aux
            ENDIF
@@ -102,6 +102,7 @@ SUBROUTINE compute_sigma_avg(sigma_avg,becp_nc,ik,lsigma)
      ENDDO
   ENDDO
 
+  npw = ngk(ik)
   DO ibnd = 1, nbnd
      rho%of_r = 0.d0
      magtot1 = 0.d0
@@ -110,8 +111,8 @@ SUBROUTINE compute_sigma_avg(sigma_avg,becp_nc,ik,lsigma)
      !--  Pseudo part
      psic_nc = (0.D0,0.D0)
      DO ig = 1, npw
-        psic_nc(nls(igk(ig)), 1)=evc(ig     ,ibnd)
-        psic_nc(nls(igk(ig)), 2)=evc(ig+npwx,ibnd)
+        psic_nc(nls(igk_k(ig,ik)), 1)=evc(ig     ,ibnd)
+        psic_nc(nls(igk_k(ig,ik)), 2)=evc(ig+npwx,ibnd)
      ENDDO
      DO ipol=1,npol
         CALL invfft ('Wave', psic_nc(:,ipol), dffts)
@@ -152,25 +153,25 @@ SUBROUTINE compute_sigma_avg(sigma_avg,becp_nc,ik,lsigma)
            dfy = 0.d0
            npwi=(ipol-1)*npwx+1
            npwf=(ipol-1)*npwx+npw
-           dfx(nls(igk(1:npw))) = (xk(1,ik)+g(1,igk(1:npw)))*tpiba* &
+           dfx(nls(igk_k(1:npw,ik))) = (xk(1,ik)+g(1,igk_k(1:npw,ik)))*tpiba* &
                 (0.d0,1.d0)*evc(npwi:npwf,ibnd)
-           dfy(nls(igk(1:npw))) = (xk(2,ik)+g(2,igk(1:npw)))*tpiba* &
+           dfy(nls(igk_k(1:npw,ik))) = (xk(2,ik)+g(2,igk_k(1:npw,ik)))*tpiba* &
                 (0.d0,1.d0)*evc(npwi:npwf,ibnd)
            CALL invfft ('Wave', dfx, dffts)
            CALL invfft ('Wave', dfy, dffts)
            DO i = 1, dffts%nr1
               xx = (i-1)*dx - x0
-              DO j = 1, dffts%nr2
-                 yy = (j-1)*dy - y0
+              DO j = 1, dffts%my_nr2p
+                 yy = (dffts%my_i0r2p+j-1)*dy - y0
                  r_aux = DSQRT (xx**2 + yy**2)
                  IF (r_aux<=r_cut) THEN
-                    DO k = 1, dffts%npp(me_pool+1)
-                       ijk = i + (j-1)*dffts%nr1x + (k-1)*dffts%nr1x*dffts%nr2x
+                    DO k = 1, dffts%my_nr3p
+                       ijk = i + (j-1)*dffts%nr1x + (k-1)*dffts%nr1x*dffts%my_nr2p
                        dfx(ijk) = xx * dfy(ijk) - yy * dfx(ijk)
                     ENDDO
                  ELSE
-                    DO k = 1, dffts%npp(me_pool+1)
-                       ijk = i + (j-1)*dffts%nr1x + (k-1)*dffts%nr1x*dffts%nr2x
+                    DO k = 1, dffts%my_nr3p
+                       ijk = i + (j-1)*dffts%nr1x + (k-1)*dffts%nr1x*dffts%my_nr2p
                        dfx (ijk) = 0.d0
                     ENDDO
                  ENDIF
@@ -231,10 +232,10 @@ SUBROUTINE compute_sigma_avg(sigma_avg,becp_nc,ik,lsigma)
                  ENDDO
                  IF (lsigma(1)) THEN
                     DO ih = 1, nh(np)
-                       magtot2(1)=magtot2(1)+ 2.d0*qq(ih,ih,np)  &
+                       magtot2(1)=magtot2(1)+ 2.d0*qq_nt(ih,ih,np)  &
                             * REAL( be1(ih,2)*conjg(be1(ih,1)) )
                        DO jh = ih + 1, nh(np)
-                          magtot2(1)=magtot2(1)+2.d0*qq(ih,jh,np) &
+                          magtot2(1)=magtot2(1)+2.d0*qq_nt(ih,jh,np) &
                                * REAL( be1(jh,2)*conjg(be1(ih,1))+ &
                                be1(jh,1)*conjg(be1(ih,2)) )
 
@@ -243,10 +244,10 @@ SUBROUTINE compute_sigma_avg(sigma_avg,becp_nc,ik,lsigma)
                  ENDIF
                  IF (lsigma(2)) THEN
                     DO ih = 1, nh(np)
-                       magtot2(2)=magtot2(2)+ 2.d0*qq(ih,ih,np)*aimag   &
+                       magtot2(2)=magtot2(2)+ 2.d0*qq_nt(ih,ih,np)*aimag   &
                             ( be1(ih,2)*conjg(be1(ih,1)) )
                        DO jh = ih + 1, nh(np)
-                          magtot2(2)=magtot2(2) + 2.d0*qq(ih,jh,np)*aimag &
+                          magtot2(2)=magtot2(2) + 2.d0*qq_nt(ih,jh,np)*aimag &
                                (  be1(jh,2) * conjg(be1(ih,1)) &
                                - be1(jh,1) * conjg(be1(ih,2)) )
                        ENDDO
@@ -254,10 +255,10 @@ SUBROUTINE compute_sigma_avg(sigma_avg,becp_nc,ik,lsigma)
                  ENDIF
                  IF (lsigma(3)) THEN
                     DO ih = 1, nh(np)
-                       magtot2(3) = magtot2(3) + qq(ih,ih,np)*              &
+                       magtot2(3) = magtot2(3) + qq_nt(ih,ih,np)*              &
                             ( abs(be1(ih,1))**2 - abs(be1(ih,2))**2 )
                        DO jh = ih + 1, nh(np)
-                          magtot2(3) = magtot2(3) + 2.d0*qq(ih,jh,np) &
+                          magtot2(3) = magtot2(3) + 2.d0*qq_nt(ih,jh,np) &
                                * REAL( be1(jh,1)*conjg(be1(ih,1)) &
                                -be1(jh,2)*conjg(be1(ih,2)) )
                        ENDDO

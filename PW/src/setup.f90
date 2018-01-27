@@ -1,5 +1,5 @@
 !
-! Copyright (C) 2001-2011 Quantum ESPRESSO group
+! Copyright (C) 2001-2016 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -42,12 +42,14 @@ SUBROUTINE setup()
   USE ions_base,          ONLY : nat, tau, ntyp => nsp, ityp, zv
   USE basis,              ONLY : starting_pot, natomwfc
   USE gvect,              ONLY : gcutm, ecutrho
+  USE gvecw,              ONLY : gcutw, ecutwfc
   USE fft_base,           ONLY : dfftp
   USE fft_base,           ONLY : dffts
-  USE grid_subroutines,   ONLY : realspace_grid_init
+  USE fft_types,          ONLY : fft_type_init, fft_type_allocate
+  USE fft_base,           ONLY : smap
   USE gvecs,              ONLY : doublegrid, gcutms, dual
   USE klist,              ONLY : xk, wk, nks, nelec, degauss, lgauss, &
-                                 lxkcry, nkstot, &
+                                 ltetra, lxkcry, nkstot, &
                                  nelup, neldw, two_fermi_energies, &
                                  tot_charge, tot_magnetization
   USE lsda_mod,           ONLY : lsda, nspin, current_spin, isk, &
@@ -56,32 +58,42 @@ SUBROUTINE setup()
   USE electrons_base,     ONLY : set_nelup_neldw
   USE start_k,            ONLY : nks_start, xk_start, wk_start, &
                                  nk1, nk2, nk3, k1, k2, k3
-  USE ktetra,             ONLY : tetra, ntetra, ltetra
+  USE ktetra,             ONLY : tetra_type, opt_tetra_init, tetra_init
   USE symm_base,          ONLY : s, t_rev, irt, nrot, nsym, invsym, nosym, &
                                  d1,d2,d3, time_reversal, sname, set_sym_bl, &
-                                 find_sym, inverse_s, no_t_rev
-  USE wvfct,              ONLY : nbnd, nbndx, ecutwfc
+                                 find_sym, inverse_s, no_t_rev &
+                                 , allfrac, remove_sym
+  USE wvfct,              ONLY : nbnd, nbndx
   USE control_flags,      ONLY : tr2, ethr, lscf, lmd, david, lecrpa,  &
                                  isolve, niter, noinv, ts_vdw, &
-                                 lbands, use_para_diag, gamma_only
+                                 lbands, use_para_diag, gamma_only, &
+                                 restart
   USE cellmd,             ONLY : calc
   USE uspp_param,         ONLY : upf, n_atom_wfc
   USE uspp,               ONLY : okvan
   USE ldaU,               ONLY : lda_plus_u, init_lda_plus_u
-  USE bp,                 ONLY : gdir, lberry, nppstr, lelfield, lorbm, nx_el, nppstr_3d,l3dstring, efield, lcalc_z2
+  USE bp,                 ONLY : gdir, lberry, nppstr, lelfield, lorbm, nx_el,&
+                                 nppstr_3d,l3dstring, efield
   USE fixed_occ,          ONLY : f_inp, tfixed_occ, one_atom_occupations
   USE funct,              ONLY : set_dft_from_name
   USE mp_pools,           ONLY : kunit
+  USE mp_bands,           ONLY : intra_bgrp_comm, nyfft
   USE spin_orb,           ONLY : lspinorb, domag
   USE noncollin_module,   ONLY : noncolin, npol, m_loc, i_cons, &
                                  angle1, angle2, bfield, ux, nspin_lsda, &
                                  nspin_gga, nspin_mag
+#if defined(__OLDXML) 
   USE pw_restart,         ONLY : pw_readfile
-  USE exx,                ONLY : ecutfock, exx_grid_init, exx_div_check
+#else
+  USE pw_restart_new,     ONLY : pw_readschema_file, init_vars_from_schema 
+  USE qes_libs_module,    ONLY : qes_reset_output, qes_reset_parallel_info, qes_reset_general_info
+  USE qes_types_module,   ONLY : output_type, parallel_info_type, general_info_type 
+#endif
+  USE exx,                ONLY : ecutfock, exx_grid_init, exx_mp_init, exx_div_check
   USE funct,              ONLY : dft_is_meta, dft_is_hybrid, dft_is_gradient
   USE paw_variables,      ONLY : okpaw
-  USE control_flags,      ONLY : restart
   USE fcp_variables,      ONLY : lfcpopt, lfcpdyn
+  USE extfield,           ONLY : gate
   !
   IMPLICIT NONE
   !
@@ -90,6 +102,19 @@ SUBROUTINE setup()
   REAL(DP) :: iocc, ionic_charge, one
   !
   LOGICAL, EXTERNAL  :: check_para_diag
+!
+#if !defined(__OLDXML)
+  TYPE(output_type)                         :: output_obj 
+  TYPE(parallel_info_type)                  :: parinfo_obj
+  TYPE(general_info_type)                   :: geninfo_obj
+#endif
+!  
+#if defined(__MPI)
+  LOGICAL :: lpara = .true.
+#else
+  LOGICAL :: lpara = .false.
+#endif
+
   !
   ! ... okvan/okpaw = .TRUE. : at least one pseudopotential is US/PAW
   !
@@ -110,11 +135,13 @@ SUBROUTINE setup()
   END IF
 
   IF ( dft_is_hybrid() ) THEN
+     IF ( allfrac ) CALL errore( 'setup ', &
+                         'option use_all_frac incompatible with hybrid XC', 1 )
      IF (.NOT. lscf) CALL errore( 'setup ', &
                          'hybrid XC not allowed in non-scf calculations', 1 )
      IF ( ANY (upf(1:ntyp)%nlcc) ) CALL infomsg( 'setup ', 'BEWARE:' // &
                & ' nonlinear core correction is not consistent with hybrid XC')
-     IF (okpaw) CALL errore('setup','PAW and hybrid XC not tested',1)
+     !IF (okpaw) CALL errore('setup','PAW and hybrid XC not tested',1)
      IF (okvan) THEN
         IF (ecutfock /= 4*ecutwfc) CALL infomsg &
            ('setup','Warning: US/PAW use ecutfock=4*ecutwfc, ecutfock ignored')
@@ -141,15 +168,23 @@ SUBROUTINE setup()
   !
   nelec = ionic_charge - tot_charge
   !
-  IF ( lfcpopt .AND. restart ) THEN
-     CALL pw_readfile( 'fcpopt', ierr )
+#if defined (__OLDXML)
+  IF ( (lfcpopt .OR. lfcpdyn) .AND. restart ) THEN
+     CALL pw_readfile( 'ef', ierr )
      tot_charge = ionic_charge - nelec
   END IF
   !
-  IF ( lfcpdyn .AND. restart ) THEN
-     CALL pw_readfile( 'fcpdyn', ierr )
-     tot_charge = ionic_charge - nelec
+#else 
+  IF ( lbands .OR. ( (lfcpopt .OR. lfcpdyn ) .AND. restart )) THEN 
+     CALL pw_readschema_file( ierr , output_obj, parinfo_obj, geninfo_obj )
   END IF
+  !
+  ! 
+  IF ( (lfcpopt .OR. lfcpdyn) .AND. restart ) THEN  
+     CALL init_vars_from_schema( 'ef', ierr,  output_obj, parinfo_obj, geninfo_obj)
+     tot_charge = ionic_charge - nelec
+  END IF 
+#endif
   !
   ! ... magnetism-related quantities
   !
@@ -369,7 +404,7 @@ SUBROUTINE setup()
   nbndx = nbnd
   IF ( isolve == 0 ) nbndx = david * nbnd
   !
-#ifdef __MPI
+#if defined(__MPI)
   use_para_diag = check_para_diag( nbnd )
 #else
   use_para_diag = .FALSE.
@@ -383,9 +418,11 @@ SUBROUTINE setup()
   ! ... Compute the cut-off of the G vectors
   !
   doublegrid = ( dual > 4.D0 )
-  IF ( doublegrid .AND. (.NOT.okvan .AND. .not.okpaw) ) &
-     CALL infomsg ( 'setup', 'no reason to have ecutrho>4*ecutwfc' )
+  IF ( doublegrid .AND. ( .NOT.okvan .AND. .NOT.okpaw .AND. &
+                          .NOT. ANY (upf(1:ntyp)%nlcc)      ) ) &
+       CALL infomsg ( 'setup', 'no reason to have ecutrho>4*ecutwfc' )
   gcutm = dual * ecutwfc / tpiba2
+  gcutw = ecutwfc / tpiba2
   !
   IF ( doublegrid ) THEN
      !
@@ -403,14 +440,18 @@ SUBROUTINE setup()
   !
   ! ... calculate dimensions of the FFT grid
   !
-  CALL realspace_grid_init ( dfftp, at, bg, gcutm )
-  IF ( gcutms == gcutm ) THEN
-     ! ... No double grid, the two grids are the same
-     dffts%nr1 = dfftp%nr1 ; dffts%nr2 = dfftp%nr2 ; dffts%nr3 = dfftp%nr3
-     dffts%nr1x= dfftp%nr1x; dffts%nr2x= dfftp%nr2x; dffts%nr3x= dfftp%nr3x
-  ELSE
-     CALL realspace_grid_init ( dffts, at, bg, gcutms)
+  ! ... if the smooth and dense grid must coincide, ensure that they do
+  ! ... also if dense grid is set from input and smooth grid is not
+  !
+  IF ( ( dfftp%nr1 /= 0 .AND. dfftp%nr2 /= 0 .AND. dfftp%nr3 /= 0 ) .AND. &
+       ( dffts%nr1 == 0 .AND. dffts%nr2 == 0 .AND. dffts%nr3 == 0 ) .AND. &
+       .NOT. doublegrid ) THEN
+     dffts%nr1 = dfftp%nr1
+     dffts%nr2 = dfftp%nr2
+     dffts%nr3 = dfftp%nr3
   END IF
+  CALL fft_type_allocate ( dfftp, at, bg, gcutm, intra_bgrp_comm, nyfft=nyfft )
+  CALL fft_type_allocate ( dffts, at, bg, gcutms, intra_bgrp_comm, nyfft=nyfft)
   !
   !  ... generate transformation matrices for the crystal point group
   !  ... First we generate all the symmetry matrices of the Bravais lattice
@@ -443,7 +484,7 @@ SUBROUTINE setup()
         nrot  = 1
         nsym  = 1
         !
-     ELSE IF (lberry .OR. lcalc_z2) THEN
+     ELSE IF (lberry ) THEN
         !
         CALL kp_strings( nppstr, gdir, nrot, s, bg, npk, &
                          k1, k2, k3, nk1, nk2, nk3, nkstot, xk, wk )
@@ -501,8 +542,9 @@ SUBROUTINE setup()
      !
      ! ... eliminate rotations that are not symmetry operations
      !
-     CALL find_sym ( nat, tau, ityp, dfftp%nr1, dfftp%nr2, dfftp%nr3, &
-                  magnetic_sym, m_loc )
+     CALL find_sym ( nat, tau, ityp, magnetic_sym, m_loc, gate )
+     !
+     IF ( .NOT. allfrac ) CALL remove_sym ( dfftp%nr1, dfftp%nr2, dfftp%nr3 )
      !
   END IF
   !
@@ -526,30 +568,41 @@ SUBROUTINE setup()
            .AND. .NOT. ( calc == 'mm' .OR. calc == 'nm' ) ) &
        CALL infomsg( 'setup', 'Dynamics, you should have no symmetries' )
   !
-  ntetra = 0
-  !
   IF ( lbands ) THEN
      !
      ! ... if calculating bands, we read the Fermi energy
      !
+#if defined (__OLDXML)
      CALL pw_readfile( 'reset', ierr )
      CALL pw_readfile( 'ef',   ierr )
+#else
+     CALL init_vars_from_schema( 'ef',   ierr , output_obj, parinfo_obj, geninfo_obj)
+#endif 
      CALL errore( 'setup ', 'problem reading ef from file ' // &
              & TRIM( tmp_dir ) // TRIM( prefix ) // '.save', ierr )
-
      !
   ELSE IF ( ltetra ) THEN
      !
      ! ... Calculate quantities used in tetrahedra method
      !
-     ntetra = 6 * nk1 * nk2 * nk3
+     IF (nks_start /= 0) CALL errore( 'setup ', 'tetrahedra need automatic k-point grid',1)
      !
-     ALLOCATE( tetra( 4, ntetra ) )
-     !
-     CALL tetrahedra( nsym, s, time_reversal, t_rev, at, bg, npk, k1, k2, k3, &
-          nk1, nk2, nk3, nkstot, xk, wk, ntetra, tetra )
+     IF (tetra_type == 0) then
+        CALL tetra_init( nsym, s, time_reversal, t_rev, at, bg, npk, k1,k2,k3, &
+             nk1, nk2, nk3, nkstot, xk )
+     ELSE 
+        CALL opt_tetra_init(nsym, s, time_reversal, t_rev, at, bg, npk, &
+             k1, k2, k3, nk1, nk2, nk3, nkstot, xk, 1)
+     END IF
      !
   END IF
+#if !defined(__OLDXML) 
+  IF ( lbands .OR. ( (lfcpopt .OR. lfcpdyn ) .AND. restart ) ) THEN 
+     CALL qes_reset_output ( output_obj ) 
+     CALL qes_reset_parallel_info ( parinfo_obj ) 
+     CALL qes_reset_general_info ( geninfo_obj ) 
+  END IF 
+#endif
   !
   !
   IF ( lsda ) THEN
@@ -584,22 +637,14 @@ SUBROUTINE setup()
   !
   IF ( nkstot > npk ) CALL errore( 'setup', 'too many k points', nkstot )
   !
-#ifdef __MPI
-  !
-  !
   ! ... distribute k-points (and their weights and spin indices)
   !
   kunit = 1
-  CALL divide_et_impera( xk, wk, isk, lsda, nkstot, nks )
+  CALL divide_et_impera ( nkstot, xk, wk, isk, nks )
   !
-#else
-  !
-  nks = nkstot
-  !
-#endif
-
   IF ( dft_is_hybrid() ) THEN
      CALL exx_grid_init()
+     CALL exx_mp_init()
      CALL exx_div_check()
   ENDIF
 
@@ -618,7 +663,7 @@ SUBROUTINE setup()
   !
   ! ... initialize d1 and d2 to rotate the spherical harmonics
   !
-  IF (lda_plus_u .or. okpaw ) CALL d_matrix( d1, d2, d3 )
+  IF (lda_plus_u .or. okpaw .or. (okvan.and.dft_is_hybrid()) ) CALL d_matrix( d1, d2, d3 )
   !
   RETURN
   !
@@ -663,7 +708,7 @@ LOGICAL FUNCTION check_para_diag( nbnd )
         ELSE
            CALL errore( 'setup','Unexpected sub-group communicator ', 1 )
         END IF
-#if defined(__ELPA)
+#if defined(__ELPA) || defined(__ELPA_2015) || defined(__ELPA_2016)
         WRITE( stdout, '(5X,"ELPA distributed-memory algorithm ", &
               & "(size of sub-group: ", I2, "*", I3, " procs)",/)') &
                np_ortho(1), np_ortho(2)

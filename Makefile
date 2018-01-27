@@ -6,7 +6,7 @@
 # of the License. See the file `License' in the root directory
 # of the present distribution.
 
-include make.sys
+include make.inc
 
 default :
 	@echo 'to install Quantum ESPRESSO, type at the shell prompt:'
@@ -27,9 +27,10 @@ default :
 	@echo '  upf          utilities for pseudopotential conversion'
 	@echo '  xspectra     X-ray core-hole spectroscopy calculations'
 	@echo '  couple       Library interface for coupling to external codes'
-	@if test -d GUI/; then \
-		echo '  gui          Graphical User Interface'; fi
-	@echo '  test-suite   Run semi-automated test-suite for regression testing'
+	@echo '  epw          Electron-Phonon Coupling with wannier functions'
+	@echo '  gui          Graphical User Interface'
+	@echo '  examples     fetch from web examples for all core packages'
+	@echo '  test-suite   run semi-automated test-suite for regression testing'
 	@echo '  all          same as "make pwall cp ld1 upf tddfpt"'
 	@echo ' '
 	@echo 'where target identifies one or multiple THIRD-PARTIES PACKAGES:'
@@ -40,15 +41,17 @@ default :
 #	@echo '  SaX          Standard GW-BSE with plane waves'
 	@echo '  yambo        electronic excitations with plane waves'
 	@echo '  yambo-devel  yambo devel version'
+	@echo '  SternheimerGW calculate GW using Sternheimer equations'
 	@echo '  plumed       Metadynamics plugin for pw or cp'
-	@echo '  epw          Electron-Phonon Coupling with wannier functions'
-	@echo '  gpu          Download the latest QE-GPU package'
+	@echo '  d3q          general third-order code and thermal transport codes'
 	@echo ' '
 	@echo 'where target is one of the following suite operation:'
 	@echo '  doc          build documentation'
 	@echo '  links        create links to all executables in bin/'
 	@echo '  tar          create a tarball of the source tree'
-	@echo '  tar-gui      create a standalone PWgui tarball from the GUI sources'
+	@if test -d GUI/; then \
+		echo '  tar-gui      create a standalone PWgui tarball from the GUI sources'; \
+		echo '  tar-qe-modes create a tarball for QE-modes (Emacs major modes for Quantum ESPRESSO)'; fi
 	@echo '  clean        remove executables and objects'
 	@echo '  veryclean    remove files produced by "configure" as well'
 	@echo '  distclean    revert distribution to the original status'
@@ -62,35 +65,39 @@ default :
 # If "|| exit 1" is not present, the error code from make in subdirectories
 # is not returned and make goes on even if compilation has failed
 
-pw : bindir libfft mods liblapack libblas libs libiotk 
+pw : bindir libfft libdavid libcg libla libutil mods liblapack libs libiotk dftd3
 	if test -d PW ; then \
 	( cd PW ; $(MAKE) TLDEPS= all || exit 1) ; fi
 
-pw-lib : bindir libfft mods liblapack libblas libs libiotk
+pw-lib : bindir libdavid libcg libfft libla libutil mods liblapack libs libiotk
 	if test -d PW ; then \
 	( cd PW ; $(MAKE) TLDEPS= pw-lib || exit 1) ; fi
 
-cp : bindir libfft mods liblapack libblas libs libiotk
+cp : bindir libdavid libcg libfft libla libutil mods liblapack libs libiotk libfox
 	if test -d CPV ; then \
 	( cd CPV ; $(MAKE) TLDEPS= all || exit 1) ; fi
 
-ph : bindir libfft mods libs pw
-	( cd install ; $(MAKE) -f plugins_makefile phonon || exit 1 )
+ph : bindir libfft libla libutil mods libs pw lrmods
+	if test -d PHonon; then \
+	(cd PHonon; $(MAKE) all || exit 1) ; fi
 
-neb : bindir libfft mods libs pw
-	( cd install ; $(MAKE) -f plugins_makefile $@ || exit 1 )
+neb : bindir libfft libla libutil mods libs pw
+	if test -d NEB; then \
+  (cd NEB; $(MAKE) all || exit 1) ; fi
 
-tddfpt : bindir libfft mods libs pw ph
-	( cd install ; $(MAKE) -f plugins_makefile $@ || exit 1 )
+tddfpt : bindir libfft libla libutil mods libs pw
+	if test -d TDDFPT; then \
+	(cd TDDFPT; $(MAKE) all || exit 1) ; fi
 
-pp : bindir libfft mods libs pw
+pp : bindir libfft libla libutil mods libs pw
 	if test -d PP ; then \
 	( cd PP ; $(MAKE) TLDEPS= all || exit 1 ) ; fi
 
-pwcond : bindir libfft mods libs pw pp
-	( cd install ; $(MAKE) -f plugins_makefile $@ || exit 1 )
+pwcond : bindir libfft libla libutil mods libs pw pp
+	if test -d PWCOND ; then \
+	( cd PWCOND ; $(MAKE) TLDEPS= all || exit 1 ) ; fi
 
-acfdt : bindir libfft mods libs pw ph
+acfdt : bindir libfft libla libutil mods libs pw ph
 	if test -d ACFDT ; then \
 	( cd ACFDT ; $(MAKE) TLDEPS= all || exit 1 ) ; fi
 
@@ -105,10 +112,14 @@ gwl : ph
 gipaw : pw
 	( cd install ; $(MAKE) -f plugins_makefile $@ || exit 1 )
 
-ld1 : bindir liblapack libblas libfft mods libs
+d3q : pw ph
 	( cd install ; $(MAKE) -f plugins_makefile $@ || exit 1 )
 
-upf : libfft mods libs liblapack libblas
+ld1 : bindir liblapack libfft libla libutil mods libs
+	if test -d atomic ; then \
+	( cd atomic ; $(MAKE) TLDEPS= all || exit 1 ) ; fi
+
+upf : libfft libla libutil mods libs liblapack
 	if test -d upftools ; then \
 	( cd upftools ; $(MAKE) TLDEPS= all || exit 1 ) ; fi
 
@@ -117,33 +128,68 @@ pw_export : libiotk bindir libfft mods libs pw
 	( cd PP ; $(MAKE) TLDEPS= pw_export.x || exit 1 ) ; fi
 
 xspectra : bindir libfft mods libs pw
-	( cd install ; $(MAKE) -f plugins_makefile $@ || exit 1 )
+	if test -d XSpectra ; then \
+	( cd XSpectra ; $(MAKE) TLDEPS= all || exit 1 ) ; fi
 
 couple : pw cp
 	if test -d COUPLE ; then \
 	( cd COUPLE ; $(MAKE) TLDEPS= all || exit 1 ) ; fi
 
-gui : touch-dummy
+# EPW needs to invoke make twice due to a Wannier90 workaround
+epw: pw ph ld1
+	if test -d EPW ; then \
+	( cd EPW ; $(MAKE) all || exit 1; \
+		cd ../bin; ln -fs ../EPW/bin/epw.x . ); fi
+
+travis : pwall epw
+	if test -d test-suite ; then \
+	( cd test-suite ; make run-travis || exit 1 ) ; fi
+
+gui :
+	@echo 'Check "GUI/README" how to access the Graphical User Interface'
+#@echo 'Check "PWgui-X.Y/README" how to access the Graphical User Interface'
+
+examples : touch-dummy
 	( cd install ; $(MAKE) -f plugins_makefile $@ || exit 1 )
 
 pwall : pw neb ph pp pwcond acfdt
 
-all   : pwall cp ld1 upf tddfpt gwl xspectra
+all   : pwall cp ld1 upf tddfpt xspectra gwl 
 
 ###########################################################
 # Auxiliary targets used by main targets:
 # compile modules, libraries, directory for binaries, etc
 ###########################################################
 
+libdavid_rci : touch-dummy libla clib libutil
+	( cd KS_Solvers/Davidson_RCI ; $(MAKE) TLDEPS= all || exit 1 )
+
+libdavid : touch-dummy libla clib libutil
+	( cd KS_Solvers/Davidson ; $(MAKE) TLDEPS= all || exit 1 )
+
+libcg : touch-dummy libla clib libutil
+	( cd KS_Solvers/CG ; $(MAKE) TLDEPS= all || exit 1 )
+
+libla : touch-dummy liblapack libutil
+	( cd LAXlib ; $(MAKE) TLDEPS= all || exit 1 )
+
 libfft : touch-dummy
 	( cd FFTXlib ; $(MAKE) TLDEPS= all || exit 1 )
 
-mods : libiotk libelpa libfft
+libutil : touch-dummy 
+	( cd UtilXlib ; $(MAKE) TLDEPS= all || exit 1 )
+
+mods : libiotk libfox libla libfft libutil
 	( cd Modules ; $(MAKE) TLDEPS= all || exit 1 )
 
 libs : mods
 	( cd clib ; $(MAKE) TLDEPS= all || exit 1 )
-	( cd flib ; $(MAKE) TLDEPS= $(FLIB_TARGETS) || exit 1 )
+
+lrmods : libs libla libfft  libutil
+	( cd LR_Modules ; $(MAKE) TLDEPS= all || exit 1 )
+
+dftd3 : mods
+	( cd dft-d3 ; $(MAKE) TLDEPS= all || exit 1 )
 
 bindir :
 	test -d bin || mkdir bin
@@ -158,21 +204,19 @@ libblas : touch-dummy
 liblapack: touch-dummy
 	cd install ; $(MAKE) -f extlibs_makefile $@
 
-libelpa: touch-dummy
-	cd install ; $(MAKE) -f extlibs_makefile $@
-
 libiotk: touch-dummy
+	cd install ; $(MAKE) -f extlibs_makefile $@
+libfox: touch-dummy
 	cd install ; $(MAKE) -f extlibs_makefile $@
 
 # In case of trouble with iotk and compilers, add
 # FFLAGS="$(FFLAGS_NOOPT)" after $(MFLAGS)
 
-
 #########################################################
 # plugins
 #########################################################
 
-w90: bindir libblas liblapack
+w90: bindir liblapack
 	( cd install ; $(MAKE) -f plugins_makefile $@ || exit 1 )
 
 want : touch-dummy
@@ -193,10 +237,7 @@ plumed: touch-dummy
 west: pw touch-dummy
 	( cd install ; $(MAKE) -f plugins_makefile $@ || exit 1 )
 
-epw: touch-dummy
-	( cd install ; $(MAKE) -f plugins_makefile $@ || exit 1 )
-
-gpu: touch-dummy
+SternheimerGW: pw lrmods touch-dummy
 	( cd install ; $(MAKE) -f plugins_makefile $@ || exit 1 )
 
 touch-dummy :
@@ -204,20 +245,7 @@ touch-dummy :
 
 #########################################################
 # "make links" produces links to all executables in bin/
-# while "make inst" INSTALLDIR=/some/place" links all
-# available executables to /some/place/ (must exist and
-# be writable), prepending "qe_" to all executables (e.g.:
-# /some/place/qe_pw.x). This allows installation of QE
-# into system directories with no danger of name conflicts
 #########################################################
-
-inst : 
-	( for exe in */*/*.x */bin/* ; do \
-	   file=`basename $$exe`; if test "$(INSTALLDIR)" != ""; then \
-		if test ! -L $(PWD)/$$exe; then \
-			ln -fs $(PWD)/$$exe $(INSTALLDIR)/qe_$$file ; fi ; \
-		fi ; \
-	done )
 
 # Contains workaround for name conflicts (dos.x and bands.x) with WANT
 links : bindir
@@ -242,10 +270,11 @@ links : bindir
 #########################################################
 
 install : touch-dummy
-	if test -d bin ; then \
-	mkdir -p $(PREFIX) ; for x in `find . -name *.x -type f` ; do \
-		cp $$x $(PREFIX)/ ; done ; \
+	@if test -d bin ; then mkdir -p $(PREFIX)/bin ; \
+	for x in `find * ! -path "test-suite/*" -name *.x -type f` ; do \
+		cp $$x $(PREFIX)/bin/ ; done ; \
 	fi
+	@echo 'Quantum ESPRESSO binaries installed in $(PREFIX)/bin'
 
 #########################################################
 # Run test-suite for numerical regression testing
@@ -261,13 +290,14 @@ test-suite: pw cp touch-dummy
 #########################################################
 
 # remove object files and executables
-clean : doc_clean
-	touch make.sys 
+clean : 
+	touch make.inc 
 	for dir in \
-		CPV FFTXlib Modules PP PW \
-		ACFDT COUPLE GWW XSpectra \
-		clib flib pwtools upftools \
-		dev-tools extlibs Environ TDDFPT \
+		CPV LAXlib FFTXlib UtilXlib Modules PP PW EPW \
+                KS_Solvers/CG KS_Solvers/Davidson KS_Solvers/Davidson_RCI \
+		NEB ACFDT COUPLE GWW XSpectra PWCOND dft-d3 \
+		atomic clib LR_Modules pwtools upftools \
+		dev-tools extlibs Environ TDDFPT PHonon GWW \
 	; do \
 	    if test -d $$dir ; then \
 		( cd $$dir ; \
@@ -276,9 +306,7 @@ clean : doc_clean
 	done
 	- @(cd install ; $(MAKE) -f plugins_makefile clean)
 	- @(cd install ; $(MAKE) -f extlibs_makefile clean)
-	- /bin/rm -rf bin/*.x tmp
-	- cd PW/tests; /bin/rm -rf CRASH *.out *.out? ; cd -
-	- cd CPV/tests; /bin/rm -rf CRASH *.out *.out? 
+	- /bin/rm -rf bin/*.x tempdir
 
 # remove files produced by "configure" as well
 veryclean : clean
@@ -286,24 +314,25 @@ veryclean : clean
 	- @(cd install ; $(MAKE) -f extlibs_makefile veryclean)
 	- rm -rf install/patch-plumed
 	- cd install ; rm -f config.log configure.msg config.status \
-	CPV/version.h ChangeLog* intel.pcl */intel.pcl
+		CPV/version.h ChangeLog* intel.pcl */intel.pcl
+	- rm -rf include/configure.h install/make_wannier90.inc
 	- cd install ; rm -fr autom4te.cache
 	- cd pseudo; ./clean_ps ; cd -
 	- cd install; ./clean.sh ; cd -
 	- cd include; ./clean.sh ; cd -
-	- rm -f espresso.tar.gz
-	- rm -rf make.sys
-
-# remove everything not in the original distribution 
+	- rm -f espresso.tar.gz -
+	- rm -rf make.inc -
+	- rm -rf FoX
+# remove everything not in the original distribution
 distclean : veryclean
 	( cd install ; $(MAKE) -f plugins_makefile $@ || exit 1 )
 
 tar :
 	@if test -f espresso.tar.gz ; then /bin/rm espresso.tar.gz ; fi
 	# do not include unneeded stuff 
-	find ./ -type f | grep -v -e /.svn/ -e'/\.' -e'\.o$$' \
-             -e'\.mod$$' -e'\.a$$' -e'\.d$$' -e'\.i$$' -e'\.F90$$' -e'\.x$$' \
-	     -e'~$$' -e'\./GUI' -e '\./tempdir' | xargs tar rvf espresso.tar
+	find ./ -type f | grep -v -e /.svn/ -e'/\.' -e'\.o$$' -e'\.mod$$'\
+		-e /.git/ -e'\.a$$' -e'\.d$$' -e'\.i$$' -e'_tmp\.f90$$' -e'\.x$$' \
+		-e'~$$' -e'\./GUI' -e '\./tempdir' | xargs tar rvf espresso.tar
 	gzip espresso.tar
 
 #########################################################
@@ -317,6 +346,17 @@ tar-gui :
 	else \
 	    echo ; \
 	    echo "  Sorry, tar-gui works only for svn sources !!!" ; \
+	    echo ; \
+	fi
+
+tar-qe-modes :
+	@if test -d GUI/QE-modes ; then \
+	    cd GUI/QE-modes ; \
+	    $(MAKE) TLDEPS= veryclean tar; \
+	    mv QE-modes-*.tar.gz ../.. ; \
+	else \
+	    echo ; \
+	    echo "  Sorry, tar-qe-modes works only for svn sources !!!" ; \
 	    echo ; \
 	fi
 
@@ -339,7 +379,10 @@ doc_clean :
 	( if test -f $$dir/Makefile ; then \
 	( cd $$dir; $(MAKE) TLDEPS= clean ) ; fi ) ;  done
 
-depend:
+depend: libiotk version
 	@echo 'Checking dependencies...'
 	- ( if test -x install/makedeps.sh ; then install/makedeps.sh ; fi)
+# update file containing version number before looking for dependencies
 
+version:
+	- ( cd Modules; make version )

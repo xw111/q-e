@@ -33,7 +33,7 @@ PROGRAM main
   !
   ! ... initialize MPI (parallel processing handling)
   !
-  CALL mp_startup ( )
+  CALL mp_startup ( diag_in_band_group = .true. , what_band_group = 0 )
   !
   ! ... start the environment
   !
@@ -60,7 +60,6 @@ PROGRAM main
   ! call to void routine for user define / plugin patches initializations
   ! temporary moved to init_run
 !  CALL plugin_initialization()
-  !
   !
   CALL check_stop_init()
   !

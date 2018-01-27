@@ -21,17 +21,19 @@ subroutine incdrhous (drhoscf, weight, ik, dbecsum, evcr, wgg, becq, &
   USE fft_interfaces, ONLY: invfft
   USE gvecs,   ONLY : nls
   USE noncollin_module, ONLY : npol
-  USE uspp,      ONLY : nkb, qq
+  USE uspp,      ONLY : nkb, qq_nt
   USE uspp_param,ONLY : nhm, nh
   USE wvfct,     ONLY : nbnd, npwx
-  USE qpoint,    ONLY : nksq, igkq, npwq, ikks
-  USE phus,      ONLY : becp1, alphap
-  USE control_ph, ONLY: nbnd_occ
-  USE eqv,       ONLY : evq, dpsi
+  USE phus,      ONLY : alphap
   USE modes,     ONLY : u
   USE mp_bands,  ONLY : intra_bgrp_comm
   USE mp,        ONLY : mp_sum
   USE becmod,    ONLY : bec_type
+  USE klist,     ONLY : ngk, igk_k
+  USE lrus,      ONLY : becp1
+  USE qpoint,    ONLY : nksq, ikqs, ikks
+  USE eqv,       ONLY : evq, dpsi
+  USE control_lr, ONLY: nbnd_occ
 
   implicit none
 
@@ -63,7 +65,7 @@ subroutine incdrhous (drhoscf, weight, ik, dbecsum, evcr, wgg, becq, &
   ! the change of wavefunctions in real sp
 
   integer :: ibnd, jbnd, nt, na, mu, ih, jh, ikb, jkb, ijkb0, &
-       startb, lastb, ipol, ikk, ir, ig
+       startb, lastb, ipol, ikk, ir, ig, npwq, ikq
   ! counters
 
   call start_clock ('incdrhous')
@@ -73,6 +75,8 @@ subroutine incdrhous (drhoscf, weight, ik, dbecsum, evcr, wgg, becq, &
   call divide (intra_bgrp_comm, nbnd, startb, lastb)
   ps1 (:,:) = (0.d0, 0.d0)
   ikk=ikks(ik)
+  ikq=ikqs(ik)
+  npwq = ngk(ikq)
   !
   !   Here we prepare the two terms
   !
@@ -91,7 +95,7 @@ subroutine incdrhous (drhoscf, weight, ik, dbecsum, evcr, wgg, becq, &
                        do jbnd = startb, lastb
                           do ipol = 1, 3
                              mu = 3 * (na - 1) + ipol
-                             ps1(ibnd,jbnd) = ps1(ibnd,jbnd) - qq(ih,jh,nt) * &
+                             ps1(ibnd,jbnd) = ps1(ibnd,jbnd) - qq_nt(ih,jh,nt) * &
                       ( alphap(ipol,ik)%k(ikb,ibnd) * CONJG(becq(ik)%k(jkb,jbnd)) + &
                         becp1(ik)%k(ikb,ibnd) * CONJG(alpq(ipol,ik)%k(jkb,jbnd)) ) * &
                         wgg (ibnd, jbnd, ik) * u (mu, mode)
@@ -105,7 +109,7 @@ subroutine incdrhous (drhoscf, weight, ik, dbecsum, evcr, wgg, becq, &
         endif
      enddo
   enddo
-#ifdef __MPI
+#if defined(__MPI)
   call mp_sum (ps1,intra_bgrp_comm)
 #endif
   dpsi (:,:) = (0.d0, 0.d0)
@@ -116,7 +120,7 @@ subroutine incdrhous (drhoscf, weight, ik, dbecsum, evcr, wgg, becq, &
      enddo
      dpsir(:) = (0.d0, 0.d0)
      do ig = 1, npwq
-        dpsir(nls(igkq(ig))) = dpsi (ig, ibnd)
+        dpsir(nls(igk_k(ig,ikq))) = dpsi (ig, ibnd)
      enddo
      CALL invfft ('Wave', dpsir, dffts)
      do ir = 1, dffts%nnr

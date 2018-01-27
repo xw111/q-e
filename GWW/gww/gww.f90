@@ -43,12 +43,12 @@
    INTEGER :: ie
    REAL(kind=DP) :: energy
 
-#ifdef __OPENMP
+#if defined(_OPENMP)
    INTEGER :: omp_get_num_threads, omp_get_max_threads
    EXTERNAL omp_set_num_threads, omp_get_num_threads, omp_get_max_threads
 #endif
 
-   tmp_dir=''
+   tmp_dir=' '
 
 !setup MPI environment
 
@@ -56,14 +56,14 @@
 
    !CALL remove_stack_limit ( )
 
-#ifdef __OPENMP
+#if defined(_OPENMP)
      ntids=omp_get_max_threads()
      ! call omp_set_num_threads(1)
 #endif
 
 
 
-#ifdef __OPENMP
+#if defined(_OPENMP)
    write(stdout,*)  'ntids = ', ntids
 #endif
 
@@ -76,13 +76,11 @@
 !  read in input structure
 
    call read_input_gww(options)
-#ifdef __MPI
+#if defined(__MPI)
    if(options%l_verbose) then
       write(name_proc,'(5i1)') &
            & (mpime+1)/10000,mod(mpime+1,10000)/1000,mod(mpime+1,1000)/100,mod(mpime+1,100)/10,mod(mpime+1,10)
       OPEN( UNIT = stdout, FILE = trim(tmp_dir)//trim(prefix)//'-out_'//name_proc, STATUS = 'UNKNOWN' )
-   else
-      if(.not.ionode) OPEN ( unit = stdout, file='/dev/null', status='unknown' )
    endif
 #endif
 

@@ -1,5 +1,5 @@
 !
-! Copyright (C) 2001-2015 Quantum ESPRESSO group
+! Copyright (C) 2001-2016 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -48,14 +48,10 @@ PROGRAM lr_main
   USE fft_base,              ONLY : dffts
   USE uspp,                  ONLY : okvan
   USE mp_bands,              ONLY : ntask_groups
-#ifdef __ENVIRON
+#if defined(__ENVIRON)
   USE plugin_flags,          ONLY : use_environ
   USE environ_info,          ONLY : environ_summary
 #endif
-
-  !Debugging
-  USE lr_variables,          ONLY : check_all_bands_gamma, check_density_gamma, &
-                                  & check_vector_gamma
   !
   IMPLICIT NONE
   !
@@ -63,13 +59,13 @@ PROGRAM lr_main
   !
   INTEGER            :: ip,na,pol_index,ibnd
   INTEGER            :: iter_restart,iteration
-  LOGICAL            :: rflag, tg_tmp
+  LOGICAL            :: rflag
   COMPLEX(kind=dp)   :: temp
   LOGICAL, EXTERNAL  :: test_restart
   !
   pol_index = 1
   !
-#ifdef __MPI
+#if defined(__MPI)
   CALL mp_startup ( )
 #endif
   !
@@ -81,8 +77,8 @@ PROGRAM lr_main
      WRITE(stdout,'("<lr_main>")')
   ENDIF
   !
-  ! Let the PHonon and Environ routines know that 
-  ! they are doing tddfpt.
+  ! Let the routines of the Environ plugin know that 
+  ! they are doing TDDFPT.
   !
   tddfpt = .TRUE.
   !
@@ -97,7 +93,7 @@ PROGRAM lr_main
   ! Writing a summary to the standard output 
   ! about Environ variables
   !
-#ifdef __ENVIRON
+#if defined(__ENVIRON)
   IF ( use_environ ) CALL environ_summary()
 #endif
   !
@@ -125,8 +121,6 @@ PROGRAM lr_main
   !
   CALL set_bgrp_indices(nbnd,ibnd_start,ibnd_end)
   !
-  tg_tmp = dffts%have_task_groups
-  !
   ! Set up initial response orbitals (starting Lanczos vectors)
   !
   IF ( test_restart(1) ) THEN
@@ -138,8 +132,6 @@ PROGRAM lr_main
   !do ip = 1, n_ipol
   !  temp = wfc_dot(ibnd)
   !enddo
-  !
-  dffts%have_task_groups = tg_tmp
   !
   DEALLOCATE( psic )
   !
@@ -215,8 +207,8 @@ PROGRAM lr_main
         !
         evc1(:,:,:,2) = evc1(:,:,:,1)
         !
-        evc1_old(:,:,:,1) = cmplx(0.0d0,0.0d0)
-        evc1_old(:,:,:,2) = cmplx(0.0d0,0.0d0)
+        evc1_old(:,:,:,1) = (0.0d0,0.0d0)
+        evc1_old(:,:,:,2) = (0.0d0,0.0d0)
         !
         iter_restart = 1
         !
@@ -236,7 +228,7 @@ PROGRAM lr_main
         !
         LR_iteration = iteration
         !
-        WRITE(stdout,'(/5x,"Lanczos iteration:",1x,i6,3x"Pol:",i1,i8)') LR_iteration, ip
+        WRITE(stdout,'(/5x,"Lanczos iteration:",1x,i6,3x,"Pol:",i1,i8)') LR_iteration, ip
         !
         CALL one_lanczos_step()
         !
@@ -311,23 +303,33 @@ CONTAINS
  
 SUBROUTINE lr_print_preamble()
     
-    USE lr_variables,        ONLY : no_hxc
+    USE lr_variables,        ONLY : no_hxc, d0psi_rs
     USE uspp,                ONLY : okvan
     USE funct,               ONLY : dft_is_hybrid
     USE martyna_tuckerman,   ONLY : do_comp_mt
     USE control_flags,       ONLY : do_makov_payne
+#if defined(__ENVIRON)
+    USE plugin_flags,        ONLY : use_environ
+#endif    
 
     IMPLICIT NONE
-
-!    WRITE( stdout, '(/5x,"----------------------------------------")' )
-!    WRITE( stdout, '(/5x,"")' )
-!    WRITE( stdout, '(/5x,"Please cite this project as:  ")' )
-!    WRITE( stdout, '(/5x,"O.B. Malcioglu, R. Gebauer, D. Rocca, S. Baroni,")' )
-!    WRITE( stdout, '(/5x,"""turboTDDFT – a code for the simulation of molecular")' )
-!    WRITE( stdout, '(/5x,"spectra using the Liouville-Lanczos approach to")' )
-!    WRITE( stdout, '(/5x,"time-dependent density-functional perturbation theory""")' )
-!    WRITE( stdout, '(/5x,"CPC, 182, 1744 (2011)")' )
-!    WRITE( stdout, '(/5x,"----------------------------------------")' )
+    !
+    WRITE( stdout, '(/5x,"=-----------------------------------------------------------------=")')
+    WRITE( stdout, '(/5x,"Please cite the TDDFPT project as:")')
+    WRITE( stdout, '(7x,"O. B. Malcioglu, R. Gebauer, D. Rocca, and S. Baroni,")')
+    WRITE( stdout, '(7x,"Comput. Phys. Commun. 182, 1744 (2011)")')
+    WRITE( stdout, '(5x,"and")' )
+    WRITE( stdout, '(7x,"X. Ge, S. J. Binnie, D. Rocca, R. Gebauer, and S. Baroni,")')
+    WRITE( stdout, '(7x,"Comput. Phys. Commun. 185, 2080 (2014)")')
+#if defined(__ENVIRON)
+    IF ( use_environ ) THEN
+      WRITE( stdout, '(5x,"and the TDDFPT+Environ project as:")' )
+      WRITE( stdout, '(7x,"I. Timrov, O. Andreussi, A. Biancardi, N. Marzari, and S. Baroni,")' )
+      WRITE( stdout, '(7x,"J. Chem. Phys. 142, 034111 (2015)")' )
+    ENDIF
+#endif
+    WRITE( stdout, '(5x,"in publications and presentations arising from this work.")' )
+    WRITE( stdout, '(/5x,"=-----------------------------------------------------------------=")')
     !
     IF (okvan) WRITE( stdout, '(/5x,"Ultrasoft (Vanderbilt) Pseudopotentials")' )
     !
@@ -342,7 +344,7 @@ SUBROUTINE lr_print_preamble()
     !
     IF (no_hxc)  THEN
        WRITE(stdout,'(5x,"No Hartree/Exchange/Correlation")')
-    ELSEIF (dft_is_hybrid()) THEN
+    ELSEIF (dft_is_hybrid() .AND. .NOT.d0psi_rs) THEN
        WRITE(stdout, '(/5x,"Use of exact-exchange enabled. Note the EXX correction to the [H,X]", &
                      & /5x,"commutator is NOT included hence the f-sum rule will be violated.",   &
                      & /5x,"You can try to use the variable d0psi_rs=.true. (see the documentation).")' )

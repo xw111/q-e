@@ -249,6 +249,7 @@ SUBROUTINE update_pot()
   IMPLICIT NONE
   !
   REAL(DP), ALLOCATABLE :: tauold(:,:,:)
+  CHARACTER(LEN=256)    :: dirname
   INTEGER               :: rho_extr, wfc_extr
   LOGICAL               :: exists
   !
@@ -342,29 +343,20 @@ SUBROUTINE update_pot()
   ! ... determines the maximum effective order of the extrapolation on the
   ! ... basis of the files that are really available (for the charge density)
   !
-  IF ( ionode ) THEN
+  rho_extr = MIN( 1, history, pot_order )
+  !
+  IF ( pot_order > 1 .AND. ionode ) THEN
      !
-     rho_extr = MIN( 1, history, pot_order )
-     !
-     INQUIRE( FILE = TRIM( tmp_dir ) // TRIM( prefix ) // &
-            & '.save/charge-density.old.dat', EXIST = exists )
-     !
-     IF ( .NOT. exists ) &
-        !
-        INQUIRE( FILE = TRIM( tmp_dir ) // TRIM( prefix ) // &
-               & '.save/charge-density.old.xml', EXIST = exists )
+     dirname =  TRIM( tmp_dir ) // TRIM( prefix ) // '.save/'
+     INQUIRE( FILE = TRIM( dirname ) // 'charge-density.old.dat', &
+          EXIST = exists )
      !
      IF ( exists ) THEN
         !
         rho_extr = MIN( 2, history, pot_order )
         !
-        INQUIRE( FILE = TRIM( tmp_dir ) // TRIM( prefix ) // &
-               & '.save/charge-density.old2.dat', EXIST = exists )
-        !
-        IF ( .NOT. exists ) &
-           !
-           INQUIRE( FILE = TRIM( tmp_dir ) // TRIM( prefix ) // &
-                  & '.save/charge-density.old2.xml', EXIST = exists )
+        INQUIRE( FILE = TRIM( dirname ) //'charge-density.old2.dat', &
+             EXIST = exists )
         !
         IF ( exists ) rho_extr = MIN( 3, history, pot_order )
         !
@@ -374,7 +366,7 @@ SUBROUTINE update_pot()
   !
   CALL mp_bcast( rho_extr, ionode_id, intra_image_comm )
   !
-  CALL extrapolate_charge( rho_extr )
+  CALL extrapolate_charge( dirname, rho_extr )
   !
   CALL stop_clock( 'update_pot' )
   !
@@ -383,7 +375,7 @@ SUBROUTINE update_pot()
 END SUBROUTINE update_pot
 !
 !----------------------------------------------------------------------------
-SUBROUTINE extrapolate_charge( rho_extr )
+SUBROUTINE extrapolate_charge( dirname, rho_extr )
   !----------------------------------------------------------------------------
   !
   USE constants,            ONLY : eps32
@@ -403,13 +395,14 @@ SUBROUTINE extrapolate_charge( rho_extr )
   USE vlocal,               ONLY : strf
   USE noncollin_module,     ONLY : noncolin
   USE klist,                ONLY : nelec
-  USE io_rho_xml,           ONLY : write_rho, read_rho
+  USE xml_io_base,          ONLY : write_rho, read_rho
   USE paw_variables,        ONLY : okpaw, ddd_paw
   USE paw_onecenter,        ONLY : PAW_potential
   !
   IMPLICIT NONE
   !
   INTEGER, INTENT(IN) :: rho_extr
+  CHARACTER(LEN=*), INTENT(IN) :: dirname
   !
   REAL(DP), ALLOCATABLE :: work(:,:), work1(:,:)
     ! work  is the difference between rho and atomic rho at time t
@@ -495,7 +488,9 @@ SUBROUTINE extrapolate_charge( rho_extr )
         WRITE( UNIT = stdout, FMT = '(5X, &
              & "NEW-OLD atomic charge density approx. for the potential")' )
         !
-        CALL write_rho( rho%of_r, 1, 'old' )
+        ! ... no need to save old charge density if no extrapolation is done
+        !
+        IF ( pot_order > 1 ) CALL write_rho( dirname, rho%of_r, 1, 'old' )
         !
      ELSE IF ( rho_extr == 2 ) THEN
         !
@@ -504,13 +499,13 @@ SUBROUTINE extrapolate_charge( rho_extr )
         !
         ! ...   oldrho  ->  work
         !
-        CALL read_rho( work, 1, 'old' )
+        CALL read_rho( dirname, work, 1, 'old' )
         !
         ! ...   rho%of_r   ->  oldrho
         ! ...   work  ->  oldrho2
         !
-        CALL write_rho( rho%of_r,  1, 'old' )
-        CALL write_rho( work, 1, 'old2' )
+        CALL write_rho( dirname, rho%of_r,  1, 'old' )
+        CALL write_rho( dirname, work, 1, 'old2' )
         !
         ! ... extrapolation
         !
@@ -528,14 +523,14 @@ SUBROUTINE extrapolate_charge( rho_extr )
         ! ...   oldrho2  ->  work1
         ! ...   oldrho   ->  work
         !
-        CALL read_rho( work1, 1, 'old2' )
-        CALL read_rho( work,  1, 'old' )
+        CALL read_rho( dirname, work1, 1, 'old2' )
+        CALL read_rho( dirname, work,  1, 'old' )
         !
         ! ...   rho%of_r   ->  oldrho
         ! ...   work  ->  oldrho2
         !
-        CALL write_rho( rho%of_r,  1, 'old' )
-        CALL write_rho( work, 1, 'old2' )
+        CALL write_rho( dirname, rho%of_r,  1, 'old' )
+        CALL write_rho( dirname, work, 1, 'old2' )
         !
         rho%of_r(:,1) = rho%of_r(:,1) + alpha0*( rho%of_r(:,1) - work(:,1) ) + &
                                beta0*( work(:,1) - work1(:,1) )
@@ -627,11 +622,11 @@ SUBROUTINE extrapolate_wfcs( wfc_extr )
   ! ... by Mead, Rev. Mod. Phys., vol 64, pag. 51 (1992), eqs. 3.20-3.29
   !
   USE io_global,            ONLY : stdout
-  USE klist,                ONLY : nks, ngk, xk
+  USE klist,                ONLY : nks, ngk, xk, igk_k
   USE lsda_mod,             ONLY : lsda, current_spin, isk
-  USE wvfct,                ONLY : nbnd, npw, npwx, igk, current_k
+  USE wvfct,                ONLY : nbnd, npwx
   USE ions_base,            ONLY : nat, tau
-  USE io_files,             ONLY : nwordwfc, iunigk, iunwfc, iunoldwfc, &
+  USE io_files,             ONLY : nwordwfc, iunwfc, iunoldwfc, &
                                    iunoldwfc2, diropn
   USE buffers,              ONLY : get_buffer, save_buffer
   USE uspp,                 ONLY : nkb, vkb, okvan
@@ -647,7 +642,7 @@ SUBROUTINE extrapolate_wfcs( wfc_extr )
   !
   INTEGER, INTENT(IN) :: wfc_extr
   !
-  INTEGER :: ik, zero_ew, lwork, info
+  INTEGER :: npw, ik, zero_ew, lwork, info
     ! do-loop variables
     ! counter on k-points
     ! number of zero 'eigenvalues' of the s_m matrix
@@ -723,8 +718,6 @@ SUBROUTINE extrapolate_wfcs( wfc_extr )
         ALLOCATE( work( lwork ) )
      END IF
      !
-     IF ( nks > 1 ) REWIND( iunigk )
-     !
      zero_ew = 0
      !
      DO ik = 1, nks
@@ -735,25 +728,18 @@ SUBROUTINE extrapolate_wfcs( wfc_extr )
         IF ( nks > 1 ) CALL get_buffer( evc, nwordwfc, iunwfc, ik )
         CALL davcio(    evc, 2*nwordwfc, iunoldwfc, ik, +1 )
         !
+        npw = ngk (ik)
         IF ( okvan ) THEN
            !
            ! ... Ultrasoft PP: calculate overlap matrix
-           ! ... various initializations: k, spin, number of PW, indices
+           ! ... Required by s_psi:
+           ! ... nonlocal pseudopotential projectors |beta>, <psi|beta>
            !
-           current_k = ik
-           IF ( lsda ) current_spin = isk(ik)
-           npw = ngk (ik)
-           IF ( nks > 1 ) READ( iunigk ) igk
-           !
-           call g2_kin (ik)
-           !
-           ! ... Calculate nonlocal pseudopotential projectors |beta>
-           !
-           IF ( nkb > 0 ) CALL init_us_2( npw, igk, xk(1,ik), vkb )
-           !
+           IF ( nkb > 0 ) CALL init_us_2( npw, igk_k(1,ik), xk(1,ik), vkb )
            CALL calbec( npw, vkb, evc, becp )
            !
            CALL s_psi ( npwx, npw, nbnd, evc, aux )
+           !
         ELSE
            !
            ! ... Norm-Conserving  PP: no overlap matrix

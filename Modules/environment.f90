@@ -5,6 +5,9 @@
 ! in the root directory of the present distribution,
 ! or http://www.gnu.org/copyleft/gpl.txt .
 !
+! Uncomment next line to print compilation info. BEWARE: may occasionally
+! give compilation errors due to lines too long if paths are very long
+!#define __HAVE_CONFIG_INFO
 !
 !==-----------------------------------------------------------------------==!
 MODULE environment
@@ -13,12 +16,15 @@ MODULE environment
   USE kinds, ONLY: DP
   USE io_files, ONLY: crash_file, nd_nmbr
   USE io_global, ONLY: stdout, meta_ionode
-  USE mp_world,  ONLY: nproc
+  USE mp_world,  ONLY: nproc, nnode
   USE mp_images, ONLY: me_image, my_image_id, root_image, nimage, &
       nproc_image
   USE mp_pools,  ONLY: npool
-  USE mp_bands,  ONLY: ntask_groups, nproc_bgrp, nbgrp
+  USE mp_bands,  ONLY: ntask_groups, nproc_bgrp, nbgrp, nyfft
   USE global_version, ONLY: version_number, svn_revision
+#if defined(__HDF5)
+  USE qeh5_base_module,   ONLY: initialize_hdf5, finalize_hdf5
+#endif
 
   IMPLICIT NONE
 
@@ -31,6 +37,9 @@ MODULE environment
 
   PUBLIC :: environment_start
   PUBLIC :: environment_end
+  PUBLIC :: opening_message
+  PUBLIC :: compilation_info
+  PUBLIC :: parallel_info
 
   !==-----------------------------------------------------------------------==!
 CONTAINS
@@ -51,7 +60,7 @@ CONTAINS
     ! ... One may use "ulimit -s unlimited" but it doesn't always work
     ! ... The following call does the same and always works
     !
-#ifdef __INTEL_COMPILER
+#if defined(__INTEL_COMPILER)
     CALL remove_stack_limit ( )
 #endif
     ! ... use ".FALSE." to disable all clocks except the total cpu time clock
@@ -66,7 +75,7 @@ CONTAINS
 
     ! ... for compatibility with PWSCF
 
-#ifdef __MPI
+#if defined(__MPI)
     nd_nmbr = TRIM ( int_to_char( me_image+1 ))
 #else
     nd_nmbr = ' '
@@ -91,6 +100,7 @@ CONTAINS
        ! ... one processor per image (other than meta_ionode)
        ! ... or, for debugging purposes, all processors,
        ! ... open their own standard output file
+!#define DEBUG
 #if defined(DEBUG)
        debug = .true.
 #endif
@@ -109,10 +119,14 @@ CONTAINS
     END IF
     !
     CALL opening_message( code_version )
-#ifdef __MPI
-    CALL parallel_info ( )
+    CALL compilation_info ( )
+#if defined(__MPI)
+    CALL parallel_info ( code )
 #else
     CALL serial_info()
+#endif
+#if defined(__HDF5) & !defined(__OLDXML)
+  CALL initialize_hdf5()
 #endif
   END SUBROUTINE environment_start
 
@@ -121,7 +135,9 @@ CONTAINS
   SUBROUTINE environment_end( code )
 
     CHARACTER(LEN=*), INTENT(IN) :: code
-
+#if defined(_HDF5)
+    CALL finalize_hdf5()
+#endif
     IF ( meta_ionode ) WRITE( stdout, * )
 
     CALL stop_clock(  TRIM(code) )
@@ -156,6 +172,8 @@ CONTAINS
          &/5X,"for quantum simulation of materials; please cite",   &
          &/9X,"""P. Giannozzi et al., J. Phys.:Condens. Matter 21 ",&
          &    "395502 (2009);", &
+         &/9X,"""P. Giannozzi et al., J. Phys.:Condens. Matter 29 ",&
+         &    "465901 (2017);", &
          &/9X," URL http://www.quantum-espresso.org"", ", &
          &/5X,"in publications or presentations arising from this work. More details at",&
          &/5x,"http://www.quantum-espresso.org/quote")' )
@@ -187,9 +205,10 @@ CONTAINS
   END SUBROUTINE closing_message
 
   !==-----------------------------------------------------------------------==!
-  SUBROUTINE parallel_info ( )
+  SUBROUTINE parallel_info ( code )
     !
-#if defined(__OPENMP)
+    CHARACTER(LEN=*), INTENT(IN) :: code
+#if defined(_OPENMP)
     INTEGER, EXTERNAL :: omp_get_max_threads
     !
     WRITE( stdout, '(/5X,"Parallel version (MPI & OpenMP), running on ",&
@@ -204,6 +223,10 @@ CONTAINS
          &I5," processors")' ) nproc 
 #endif
     !
+#if !defined(__GFORTRAN__) ||  ((__GNUC__>4) || ((__GNUC__==4) && (__GNUC_MINOR__>=8)))
+    WRITE( stdout, '(/5X,"MPI processes distributed on ",&
+         &I5," nodes")' ) nnode
+#endif
     IF ( nimage > 1 ) WRITE( stdout, &
          '(5X,"path-images division:  nimage    = ",I7)' ) nimage
     IF ( npool > 1 ) WRITE( stdout, &
@@ -212,8 +235,11 @@ CONTAINS
          '(5X,"band groups division:  nbgrp     = ",I7)' ) nbgrp
     IF ( nproc_bgrp > 1 ) WRITE( stdout, &
          '(5X,"R & G space division:  proc/nbgrp/npool/nimage = ",I7)' ) nproc_bgrp
+    IF ( nyfft > 1 ) WRITE( stdout, &
+         '(5X,"wavefunctions fft division:  Y-proc x Z-proc = ",2I7)' ) &
+         nyfft, nproc_bgrp / nyfft
     IF ( ntask_groups > 1 ) WRITE( stdout, &
-         '(5X,"wavefunctions fft division:  fft and procs/group = ",2I7)' ) &
+         '(5X,"wavefunctions fft division:  task group distribution",/,34X,"#TG    x Z-proc = ",2I7)' ) &
          ntask_groups, nproc_bgrp / ntask_groups
     !
   END SUBROUTINE parallel_info
@@ -221,11 +247,11 @@ CONTAINS
   !==-----------------------------------------------------------------------==!
   SUBROUTINE serial_info ( )
     !
-#if defined(__OPENMP)
+#if defined(_OPENMP)
     INTEGER, EXTERNAL :: omp_get_max_threads
 #endif
     !
-#if defined(__OPENMP)
+#if defined(_OPENMP)
     WRITE( stdout, '(/5X,"Serial multi-threaded version, running on ",&
          &I4," processor cores")' ) omp_get_max_threads()
     !
@@ -234,6 +260,45 @@ CONTAINS
 #endif
     !
   END SUBROUTINE serial_info
+
+  !==-----------------------------------------------------------------------==!
+  SUBROUTINE compilation_info ( )
+  !
+  ! code borrowed by WanT - prints architecture / compilation details
+  !
+#if defined(__HAVE_CONFIG_INFO)
+#include "configure.h"
+! #include "build_date.h"
+!
+     !WRITE( stdout, "(2x,'        BUILT :',4x,a)" ) TRIM( ADJUSTL( &
+     !__CONF_BUILD_DATE  ))
+     WRITE( stdout, * ) 
+     ! note: if any preprocessed variables __CONF_* exceeds 128 characters,
+     ! the compilation may give error because the line exceeds 132 characters
+     WRITE( stdout, "(2x,'         ARCH :',4x,a)" ) TRIM( ADJUSTL( &
+__CONF_ARCH))
+     WRITE( stdout, "(2x,'           CC :',4x,a)" ) TRIM( ADJUSTL( &
+__CONF_CC))
+     WRITE( stdout, "(2x,'          CPP :',4x,a)" ) TRIM( ADJUSTL( &
+__CONF_CPP))
+     WRITE( stdout, "(2x,'          F90 :',4x,a)" ) TRIM( ADJUSTL( &
+__CONF_MPIF90))
+     WRITE( stdout, "(2x,'          F77 :',4x,a)" ) TRIM( ADJUSTL( &
+__CONF_F77))
+     WRITE( stdout, "(2x,'       DFLAGS :',4x,a)" ) TRIM( ADJUSTL( &
+__CONF_DFLAGS))
+     WRITE( stdout, "(2x,'    BLAS LIBS :',4x,a)" ) TRIM( ADJUSTL( &
+__CONF_BLAS_LIBS))
+     WRITE( stdout, "(2x,'  LAPACK LIBS :',4x,a)" ) TRIM( ADJUSTL( &
+__CONF_LAPACK_LIBS))
+     WRITE( stdout, "(2x,'     FFT LIBS :',4x,a)" ) TRIM( ADJUSTL( &
+__CONF_FFT_LIBS))
+     WRITE( stdout, "(2x,'    MASS LIBS :',4x,a)" ) TRIM( ADJUSTL( &
+__CONF_MASS_LIBS))
+     !
+#endif
+   END SUBROUTINE compilation_info
+
   !==-----------------------------------------------------------------------==!
 END MODULE environment
 !==-----------------------------------------------------------------------==!

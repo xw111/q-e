@@ -18,14 +18,14 @@ SUBROUTINE dielec(do_zstar)
   USE mp_global, ONLY : intra_pool_comm
   USE mp,        ONLY : mp_sum
   USE io_files,  ONLY : seqopn
-  USE klist,     ONLY : wk !, nks
-  USE wvfct,     ONLY: nbnd, npwx, npw
+  USE klist,     ONLY : wk, ngk
+  USE wvfct,     ONLY: nbnd, npwx
   USE cgcom
 
   IMPLICIT NONE
   LOGICAL :: do_zstar
   !
-  INTEGER :: ibnd,ipol,jpol,na,nu,kpoint
+  INTEGER :: npw,ibnd,ipol,jpol,na,nu,ik
   CHARACTER(len=7) :: filbar, fildwf
   real(DP) ::  w, weight
   real(DP), ALLOCATABLE ::  work(:,:)
@@ -40,9 +40,10 @@ SUBROUTINE dielec(do_zstar)
   !
   epsilon0(:,:) = 0.d0
   IF (do_zstar) zstar (:,:,:) = 0.d0
-  !  do kpoint=1,nks
-  kpoint=1
-  weight = wk(kpoint)
+  !  do ik=1,nks
+  ik = 1
+  npw= ngk(ik)
+  weight = wk(ik)
   w = fpi/omega * weight
   !
   !** calculate Effective Charges (<DeltaV*psi(ion)|DeltaPsi(E)>)
@@ -76,7 +77,7 @@ SUBROUTINE dielec(do_zstar)
      na  = (nu-1)/3+1
      IF (has_equivalent(na)==0) THEN
         !     DeltaV*psi(ion) for mode nu is recalculated
-        CALL dvpsi_kb(kpoint,nu)
+        CALL dvpsi_kb(ik,nu)
         !
         jpol= mod(nu-1,3)+1
         ! work is the real part of <DeltaV*Psi(ion)|DeltaPsi(E)>
@@ -111,7 +112,7 @@ SUBROUTINE dielec(do_zstar)
      ENDDO
   ENDDO
   !     end do
-#ifdef __MPI
+#if defined(__MPI)
   IF (do_zstar) CALL mp_sum( zstar, intra_pool_comm )
   CALL mp_sum( epsilon0, intra_pool_comm )
 #endif

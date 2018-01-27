@@ -1,5 +1,5 @@
 !
-! Copyright (C) 2001-2015 Quantum ESPRESSO group
+! Copyright (C) 2001-2016 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -26,12 +26,14 @@ SUBROUTINE s_psi( lda, n, m, psi, spsi )
   !
   ! ...    spsi  S*psi
   !
-  ! ... bgrp parallelization allowed
+  ! --- Wrapper routine: performs bgrp parallelization on non-distributed bands
+  ! --- if suitable and required, calls old S\psi routine s_psi_
+  ! --- See comments in h_psi.f90 about band parallelization
   !
   USE kinds,            ONLY : DP
   USE noncollin_module, ONLY : npol
   USE funct,            ONLY : exx_is_active
-  USE mp_bands,         ONLY : tbgrp, set_bgrp_indices, inter_bgrp_comm
+  USE mp_bands,         ONLY : use_bgrp_in_hpsi, set_bgrp_indices, inter_bgrp_comm
   USE mp,               ONLY : mp_sum
   !
   IMPLICIT NONE
@@ -40,23 +42,22 @@ SUBROUTINE s_psi( lda, n, m, psi, spsi )
   COMPLEX(DP), INTENT(IN) :: psi(lda*npol,m)
   COMPLEX(DP), INTENT(OUT)::spsi(lda*npol,m)
   !
-  INTEGER     :: m_start, m_end
+  INTEGER     :: m_start, m_end, i
   !
   CALL start_clock( 's_psi_bgrp' )
 
-! if exx_is_active bgrp parallelization is already used in exx routines that are part of Hpsi !
-! if m <= 1 there is nothing to distribute so we can avoid the communication step.
-!           moreover if a band by band diagonalization (such as ParO for instance) is used it may 
-!           be useful/necessary to operate on different vectors independently.
-  if (tbgrp .and. .not. exx_is_active() .and. m > 1) then
-      spsi(:,:) = (0.d0,0.d0)
-      call set_bgrp_indices(m,m_start,m_end)
-      if (m_end >= m_start)  & !! at least one band in this band group
-          call s_psi_( lda, n, m_end-m_start+1, psi(1,m_start), spsi(1,m_start) )
-      call mp_sum(spsi,inter_bgrp_comm)
-   else ! no one else to communicate with 
-      call s_psi_( lda, n, m, psi, spsi )
-   end if
+  IF (use_bgrp_in_hpsi .AND. .NOT. exx_is_active() .AND. m > 1) THEN
+     ! use band parallelization here
+     spsi(:,:) = (0.d0,0.d0)
+     CALL set_bgrp_indices(m,m_start,m_end) ; !write(6,*) m, m_start,m_end
+     ! Check if there at least one band in this band group
+     IF (m_end >= m_start) &
+        CALL s_psi_( lda, n, m_end-m_start+1, psi(1,m_start), spsi(1,m_start) )
+     CALL mp_sum(spsi,inter_bgrp_comm)
+  ELSE
+     ! don't use band parallelization here
+     CALL s_psi_( lda, n, m, psi, spsi )
+  END IF
 
   CALL stop_clock( 's_psi_bgrp' )
   RETURN
@@ -85,14 +86,15 @@ SUBROUTINE s_psi_( lda, n, m, psi, spsi )
   !
   USE kinds,      ONLY : DP
   USE becmod,     ONLY : becp
-  USE uspp,       ONLY : vkb, nkb, okvan, qq, qq_so, indv_ijkb0
+  USE uspp,       ONLY : vkb, nkb, okvan, qq_at, qq_so, indv_ijkb0
   USE spin_orb,   ONLY : lspinorb
   USE uspp_param, ONLY : upf, nh, nhm
   USE ions_base,  ONLY : nat, nsp, ityp
   USE control_flags,    ONLY: gamma_only 
   USE noncollin_module, ONLY: npol, noncolin
-  USE realus,     ONLY :  real_space, invfft_orbital_gamma, initialisation_level,&
-                          fwfft_orbital_gamma, calbec_rs_gamma, s_psir_gamma
+  USE realus,     ONLY :  real_space, &
+                  invfft_orbital_gamma, fwfft_orbital_gamma, calbec_rs_gamma, s_psir_gamma, &
+                  invfft_orbital_k, fwfft_orbital_k, calbec_rs_k, s_psir_k
   !
   IMPLICIT NONE
   !
@@ -135,7 +137,20 @@ SUBROUTINE s_psi_( lda, n, m, psi, spsi )
      !
   ELSE 
      !
-     CALL s_psi_k()
+     IF (real_space ) THEN
+        !
+        DO ibnd = 1, m
+           !   transform the orbital to real space
+           CALL invfft_orbital_k(psi,ibnd,m) 
+           CALL s_psir_k(ibnd,m)
+           CALL fwfft_orbital_k(spsi,ibnd,m)
+        END DO
+        !
+     ELSE
+        !
+        CALL s_psi_k()
+        !
+     END IF    
      !
   END IF    
   !
@@ -161,7 +176,7 @@ SUBROUTINE s_psi_( lda, n, m, psi, spsi )
          ! counters
        INTEGER :: nproc, mype, m_loc, m_begin, ibnd_loc, icyc, icur_blk, m_max
          ! data distribution indexes
-       INTEGER, EXTERNAL :: ldim_block, lind_block, gind_block
+       INTEGER, EXTERNAL :: ldim_block, gind_block
          ! data distribution functions
        REAL(DP), ALLOCATABLE :: ps(:,:)
          ! the product vkb and psi
@@ -204,7 +219,7 @@ SUBROUTINE s_psi_( lda, n, m, psi, spsi )
                    !
                    IF ( m_loc > 0 ) THEN
                       CALL DGEMM('N', 'N', nh(nt), m_loc, nh(nt), 1.0_dp, &
-                                  qq(1,1,nt), nhm, becp%r(indv_ijkb0(na)+1,1),&
+                                  qq_at(1,1,na), nhm, becp%r(indv_ijkb0(na)+1,1),&
                                   nkb, 0.0_dp, ps(indv_ijkb0(na)+1,1), nkb )
                    END IF
                 END IF
@@ -281,9 +296,9 @@ SUBROUTINE s_psi_( lda, n, m, psi, spsi )
              ! qq is real:  copy it into a complex variable to perform
              ! a zgemm - simple but sub-optimal solution
              ALLOCATE( qqc(nh(nt),nh(nt)) )
-             qqc(:,:) = CMPLX ( qq(1:nh(nt),1:nh(nt),nt), 0.0_dp, KIND=dp )
              DO na = 1, nat
                 IF ( ityp(na) == nt ) THEN
+                   qqc(:,:) = CMPLX ( qq_at(1:nh(nt),1:nh(nt),na), 0.0_dp, KIND=dp )
                    CALL ZGEMM('N','N', nh(nt), m, nh(nt), (1.0_dp,0.0_dp), &
                         qqc, nh(nt), becp%k(indv_ijkb0(na)+1,1), nkb, &
                         (0.0_dp,0.0_dp), ps(indv_ijkb0(na)+1,1), nkb )
@@ -347,7 +362,7 @@ SUBROUTINE s_psi_( lda, n, m, psi, spsi )
                             DO ipol=1,npol
                                DO ibnd = 1, m
                                   ps(ikb,ipol,ibnd) = ps(ikb,ipol,ibnd) + &
-                                       qq(ih,jh,nt)*becp%nc(jkb,ipol,ibnd)
+                                       qq_at(ih,jh,na)*becp%nc(jkb,ipol,ibnd)
                                END DO
                             END DO
                          ELSE

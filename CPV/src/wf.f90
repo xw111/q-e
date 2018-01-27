@@ -326,15 +326,15 @@ SUBROUTINE wf( clwf, c, bec, eigr, eigrb, taub, irb, &
                  qv(npb(ig))=eigrb(ig,isa)*qgb(ig,ijv,is)
                  qv(nmb(ig))=CONJG(eigrb(ig,isa)*qgb(ig,ijv,is))
               END DO
-#ifdef __MPI
+#if defined(__MPI)
               irb3=irb(3,isa)
 #endif
-              CALL invfft('Box',qv,dfftb,isa)
+              CALL invfft(qv,dfftb,isa)
               iqv=1
               qvt=(0.D0,0.D0)
               qvt=boxdotgridcplx(irb(1,isa),qv,expo(1,inw))
 
-#ifdef __MPI
+#if defined(__MPI)
               CALL mp_sum( qvt, intra_bgrp_comm )
 #endif
               !
@@ -370,11 +370,11 @@ SUBROUTINE wf( clwf, c, bec, eigr, eigrb, taub, irb, &
                     qv(npb(ig))=eigrb(ig,isa)*qgb(ig,ijv,is)
                     qv(nmb(ig))=CONJG(eigrb(ig,isa)*qgb(ig,ijv,is))
                  END DO
-                 CALL invfft('Box',qv,dfftb,isa)
+                 CALL invfft(qv,dfftb,isa)
                  iqv=1
                  qvt=0.D0
                  qvt=boxdotgridcplx(irb(1,isa),qv,expo(1,inw))
-#ifdef __MPI
+#if defined(__MPI)
                  CALL mp_sum( qvt, intra_bgrp_comm )
 #endif
                  !
@@ -468,7 +468,7 @@ SUBROUTINE wf( clwf, c, bec, eigr, eigrb, taub, irb, &
         !           cwf(:,:)=c(:,:,1,1)
         CALL zgemm('C','N',nbsp,nupdwn(1),ngw,ONE,c,ngw,c_psp,ngw,ONE,Xsp,nbsp)
         CALL zgemm('T','N',nbsp,nupdwn(1),ngw,ONE,c,ngw,c_msp,ngw,ONE,Xsp,nbsp)
-#ifdef __MPI
+#if defined(__MPI)
         CALL mp_sum ( Xsp, intra_bgrp_comm )
 #endif
         DO i=1,nupdwn(1)
@@ -495,7 +495,7 @@ SUBROUTINE wf( clwf, c, bec, eigr, eigrb, taub, irb, &
         !           cwf(:,:)=c(:,:,1,1)
         CALL zgemm('C','N',nbsp,nupdwn(2),ngw,ONE,c,ngw,c_psp,ngw,ONE,Xsp,nbsp)
         CALL zgemm('T','N',nbsp,nupdwn(2),ngw,ONE,c,ngw,c_msp,ngw,ONE,Xsp,nbsp)
-#ifdef __MPI
+#if defined(__MPI)
         CALL mp_sum ( Xsp, intra_bgrp_comm )
 #endif
         DO i=iupdwn(2),nbsp
@@ -510,7 +510,7 @@ SUBROUTINE wf( clwf, c, bec, eigr, eigrb, taub, irb, &
 
   END DO
 
-#ifdef __MPI
+#if defined(__MPI)
   DEALLOCATE(ns)
 #endif
 
@@ -874,12 +874,7 @@ SUBROUTINE ddyn( m, Omat, Umat, b1, b2, b3 )
         END DO
      END DO
 
-#if ! defined __ESSL
      CALL zhpev('V','U',m,wp,wr,z,m,f1,f2,ierr1)
-#else
-     CALL zhpev(21, wp, wr, z, m, m, f2, 4*m)
-     ierr1 = 0
-#endif
 
      IF (ierr1.NE.0) THEN 
         WRITE( stdout, * ) "failed to diagonalize W!"
@@ -1027,7 +1022,7 @@ SUBROUTINE wfunc_init( clwf, b1, b2, b3, ibrav )
   !
   REAL(DP), INTENT(in) :: b1(3),b2(3),b3(3)
   INTEGER,  INTENT(in) :: clwf, ibrav
-#ifdef __MPI
+#if defined(__MPI)
   INTEGER :: ntot, proc, ierr, i,j,inw,ngppp(nproc_bgrp)
   INTEGER :: ii,ig,displs(nproc_bgrp)
 #else
@@ -1065,7 +1060,7 @@ SUBROUTINE wfunc_init( clwf, b1, b2, b3, ibrav )
      gnn(3,i)=mill(3,i)
   END DO
 
-#ifdef __MPI
+#if defined(__MPI)
 
   ntot=0
   DO i=1,nproc_bgrp
@@ -1120,7 +1115,7 @@ SUBROUTINE wfunc_init( clwf, b1, b2, b3, ibrav )
   !
   IF(nvb.GT.0) CALL small_box_wf(i_1, j_1, k_1, nw1)
 
-#ifdef __MPI
+#if defined(__MPI)
   !
   CALL mp_barrier( intra_bgrp_comm )
   !
@@ -1144,7 +1139,7 @@ SUBROUTINE wfunc_init( clwf, b1, b2, b3, ibrav )
 
   IF(me.EQ.1) THEN
      IF(clwf.EQ.5) THEN
-#ifdef __MPI
+#if defined(__MPI)
         DO ii=1,ntot
            WRITE(21,*) bigg(:,ii)
         END DO
@@ -1199,13 +1194,13 @@ SUBROUTINE wfunc_init( clwf, b1, b2, b3, ibrav )
 !$omp end parallel do
         WRITE( stdout, * ) "Translation", inw, "for", ngw, "G vectors"
      ELSE
-#ifdef __MPI
+#if defined(__MPI)
         IF(me.EQ.1) THEN   
 #endif
            IF(gstart.EQ.2) THEN
               indexminus(1,inw)=-1
            END IF
-#ifdef __MPI
+#if defined(__MPI)
         END IF
 #endif
 !$omp parallel do private(ti,tj,tk)
@@ -1265,7 +1260,7 @@ SUBROUTINE wfunc_init( clwf, b1, b2, b3, ibrav )
      END IF
   END DO
 
-#ifdef __MPI
+#if defined(__MPI)
 
   CALL mp_barrier( intra_bgrp_comm )
   !
@@ -1301,7 +1296,8 @@ SUBROUTINE grid_map()
   !
   IMPLICIT NONE
   !
-  INTEGER :: ir1, ir2, ir3, ibig3, me, nr1s, nr2s, nr3s, nr1sx, nr2sx, nr3sx
+  INTEGER :: ir1, ir2, ir3, ibig2, ibig3, me, nr1s, nr2s, nr3s, nr1sx, nr2sx, nr3sx, nx, nxy
+  REAL(DP) :: obnr1sx, obnr2sx, obnr3sx
   !
   me = me_bgrp + 1
   !
@@ -1309,31 +1305,39 @@ SUBROUTINE grid_map()
   ALLOCATE(ydist(dffts%nnr))
   ALLOCATE(zdist(dffts%nnr))
   !
-  nr1s = dffts%nr1
-  nr2s = dffts%nr2
-  nr1sx = dffts%nr1x
-  nr2sx = dffts%nr2x
-  nr3sx = dffts%nr3x
-  nr3s = dffts%nr3
+  nr1s = dffts%nr1 ;  nr1sx = dffts%nr1x ; obnr1sx = 1.D0/DBLE(nr1sx)
+  nr2s = dffts%nr2 ;  nr2sx = dffts%nr2x ; obnr2sx = 1.D0/DBLE(nr2sx)
+  nr3s = dffts%nr3 ;  nr3sx = dffts%nr3x ; obnr3sx = 1.D0/DBLE(nr3sx)
+  nx  = nr1sx
+#if defined(__MPI)
+  nxy = nr1sx* dffts%my_nr2p
+#else
+  nxy = nr1sx* nr2sx
+#endif
   DO ir3=1,nr3s
-#ifdef __MPI
-     ibig3 = ir3 - dffts%ipp( me )
-     IF(ibig3.GT.0.AND.ibig3.LE.dffts%npp(me)) THEN
+#if defined(__MPI)
+     ibig3 = ir3 - dffts%my_i0r3p
+     IF(ibig3.GT.0.AND.ibig3.LE.dffts%my_nr3p) THEN
 #else
         ibig3=ir3
 #endif
         DO ir2=1,nr2s
-           DO ir1=1,nr1s
-              xdist(ir1+(ir2-1)*nr1sx+(ibig3-1)*nr1sx*nr2sx) =                     &
-                   &                  ((ir1-1)/DBLE(nr1sx))
-              ydist(ir1+(ir2-1)*nr1sx+(ibig3-1)*nr1sx*nr2sx) =                   &
-                   &                  ((ir2-1)/DBLE(nr2sx))
-              zdist(ir1+(ir2-1)*nr1sx+(ibig3-1)*nr1sx*nr2sx) =                     &
-                   &                  ((ir3-1)/DBLE(nr3sx))
-              !         
-           END DO
+#if defined(__MPI)
+           ibig2 = ir2 - dffts%my_i0r2p
+           IF(ibig2.GT.0.AND.ibig2.LE.dffts%my_nr2p) THEN
+#else
+              ibig2=ir2
+#endif
+              DO ir1=1,nr1s
+                 xdist(ir1+(ibig2-1)*nx+(ibig3-1)*nxy) = (ir1-1)*obnr1sx
+                 ydist(ir1+(ibig2-1)*nx+(ibig3-1)*nxy) = (ir2-1)*obnr2sx
+                 zdist(ir1+(ibig2-1)*nx+(ibig3-1)*nxy) = (ir3-1)*obnr3sx
+              END DO
+#if defined(__MPI)
+           END IF
+#endif
         END DO
-#ifdef __MPI
+#if defined(__MPI)
      END IF
 #endif
   END DO
@@ -1904,12 +1908,19 @@ SUBROUTINE small_box_wf( i_1, j_1, k_1, nw1 )
   !
   IMPLICIT NONE
 
-  INTEGER ir1, ir2, ir3, ibig3 , inw
-  REAL(DP) x
   INTEGER , INTENT(in) :: nw1, i_1(nw1), j_1(nw1), k_1(nw1)
-  INTEGER :: me
+  INTEGER ir1, ir2, ir3, ibig2, ibig3 , inw
+  REAL(DP) x, obnr1x, obnr2x, obnr3x
+  INTEGER :: me, nx, nxy
 
   me = me_bgrp + 1
+  obnr1x = 1.D0/dfftp%nr1x ; obnr2x = 1.D0/dfftp%nr2x ; obnr3x = 1.D0/dfftp%nr3x 
+  nx = dfftp%nr1x 
+#if defined(__MPI)
+  nxy = dfftp%nr1x * dfftp%my_nr2p
+#else
+  nxy = dfftp%nr1x * dfftp%nr2x
+#endif
 
   ALLOCATE(expo(dfftp%nnr,nw1))
 
@@ -1918,21 +1929,30 @@ SUBROUTINE small_box_wf( i_1, j_1, k_1, nw1 )
      WRITE( stdout, * ) inw ,":", i_1(inw), j_1(inw), k_1(inw)
 
      DO ir3=1,dfftp%nr3
-#ifdef __MPI
-        ibig3 = ir3 - dfftp%ipp( me )
-        IF(ibig3.GT.0.AND.ibig3.LE.dfftp%npp(me)) THEN
+#if defined(__MPI)
+        ibig3 = ir3 - dfftp%my_i0r3p
+        IF(ibig3.GT.0.AND.ibig3.LE.dfftp%my_nr3p) THEN
 #else
            ibig3=ir3
 #endif
            DO ir2=1,dfftp%nr2
-              DO ir1=1,dfftp%nr1
-                 x =  (((ir1-1)/DBLE(dfftp%nr1x))*i_1(inw) +                          &
-                      &                  ((ir2-1)/DBLE(dfftp%nr2x))*j_1(inw) +             &
-                      &                  ((ir3-1)/DBLE(dfftp%nr3x))*k_1(inw))*0.5d0*fpi
-                 expo(ir1+(ir2-1)*dfftp%nr1x+(ibig3-1)*dfftp%nr1x*dfftp%nr2x,inw) = CMPLX(COS(x), -SIN(x),kind=DP)
-              END DO
+#if defined(__MPI)
+              ibig2 = ir2 - dfftp%my_i0r2p
+              IF(ibig2.GT.0.AND.ibig2.LE.dfftp%my_nr2p) THEN
+#else
+                 ibig2=ir2
+#endif
+                 DO ir1=1,dfftp%nr1
+                    x =  (((ir1-1)*obnr1x)*i_1(inw) + &
+                      &   ((ir2-1)*obnr2x)*j_1(inw) + &
+                      &   ((ir3-1)*obnr3x)*k_1(inw))*0.5d0*fpi
+                    expo(ir1+(ibig2-1)*nx+(ibig3-1)*nxy,inw) = CMPLX(COS(x), -SIN(x),kind=DP)
+                 END DO
+#if defined(__MPI)
+              END IF
+#endif
            END DO
-#ifdef __MPI
+#if defined(__MPI)
         END IF
 #endif
      END DO
@@ -1970,22 +1990,29 @@ FUNCTION boxdotgridcplx(irb,qv,vr)
   DO ir3=1,dfftb%nr3
      ibig3=irb(3)+ir3-1
      ibig3=1+MOD(ibig3-1,dfftp%nr3)
-#ifdef __MPI
-     ibig3 = ibig3 - dfftp%ipp( me )
-     IF (ibig3.GT.0.AND.ibig3.LE.dfftp%npp(me)) THEN
+#if defined(__MPI)
+     ibig3 = ibig3 - dfftp%my_i0r3p
+     IF (ibig3.GT.0.AND.ibig3.LE.dfftp%my_nr3p) THEN
 #endif
         DO ir2=1,dfftb%nr2
            ibig2=irb(2)+ir2-1
            ibig2=1+MOD(ibig2-1,dfftp%nr2)
-           DO ir1=1,dfftb%nr1
-              ibig1=irb(1)+ir1-1
-              ibig1=1+MOD(ibig1-1,dfftp%nr1)
-              ibig=ibig1 + (ibig2-1)*dfftp%nr1x + (ibig3-1)*dfftp%nr1x*dfftp%nr2x
-              ir  =ir1 + (ir2-1)*dfftb%nr1x + (ir3-1)*dfftb%nr1x*dfftb%nr2x
-              boxdotgridcplx = boxdotgridcplx + qv(ir)*vr(ibig)
-           END DO
+#if defined(__MPI)
+           ibig2 = ibig2 - dfftp%my_i0r2p
+           IF (ibig2.GT.0.AND.ibig2.LE.dfftp%my_nr2p) THEN
+#endif
+              DO ir1=1,dfftb%nr1
+                 ibig1=irb(1)+ir1-1
+                 ibig1=1+MOD(ibig1-1,dfftp%nr1)
+                 ibig=ibig1 + (ibig2-1)*dfftp%nr1x + (ibig3-1)*dfftp%nr1x*dfftp%my_nr2p
+                 ir  =ir1 + (ir2-1)*dfftb%nr1x + (ir3-1)*dfftb%nr1x*dfftb%nr2x
+                 boxdotgridcplx = boxdotgridcplx + qv(ir)*vr(ibig)
+              END DO
+#if defined(__MPI)
+           ENDIF
+#endif
         END DO
-#ifdef __MPI
+#if defined(__MPI)
      ENDIF
 #endif
   END DO
@@ -2015,7 +2042,7 @@ SUBROUTINE write_rho_g( rhog )
   COMPLEX(DP),ALLOCATABLE :: bigrho(:)
   COMPLEX(DP) :: rhotmp_g(ngm)
   INTEGER           :: ntot, i, j, me
-#ifdef __MPI
+#if defined(__MPI)
   INTEGER proc, ierr, ngdens(nproc_bgrp), displs(nproc_bgrp)
 #endif
   CHARACTER (LEN=6)  :: name
@@ -2031,7 +2058,7 @@ SUBROUTINE write_rho_g( rhog )
      gnx(3,i)=g(3,i)
   END DO
 
-#ifdef __MPI
+#if defined(__MPI)
 
   DO i=1,nproc_bgrp
      ngdens(i)=(dfftp%ngl(i)+1)/2
@@ -2148,7 +2175,7 @@ SUBROUTINE macroscopic_average( rhog, tau0, e_tuned )
   COMPLEX(DP), ALLOCATABLE :: rhotmp_g(:)
   INTEGER ntot, i, j, ngz, l, isa
   INTEGER ,ALLOCATABLE :: g_red(:,:)
-#ifdef __MPI
+#if defined(__MPI)
   INTEGER proc, ierr, ngdens(nproc_bgrp), displs( nproc_bgrp )
 #endif
   REAL(DP) zlen,vtot, pos(3,nax,nsp), a_direct(3,3),a_trans(3,3), e_slp, e_int
@@ -2169,7 +2196,7 @@ SUBROUTINE macroscopic_average( rhog, tau0, e_tuned )
      gnx(3,i)=g(3,i)
   END DO
 
-#ifdef __MPI
+#if defined(__MPI)
 
   DO i=1,nproc_bgrp
      ngdens(i)=(dfftp%ngl(i)+1)/2
@@ -2187,7 +2214,7 @@ SUBROUTINE macroscopic_average( rhog, tau0, e_tuned )
   ALLOCATE (bigrho(ntot))
   ALLOCATE (bigrhog(2*ntot-1))
 
-#ifdef __MPI
+#if defined(__MPI)
   CALL mp_barrier( intra_bgrp_comm )
   !
   CALL mp_gather( gnx, bigg, ngdens, displs, root_bgrp,intra_bgrp_comm )
@@ -2556,18 +2583,7 @@ SUBROUTINE wfsteep( m, Omat, Umat, b1, b2, b3 )
            END DO
         END DO
 
-#if defined (__ESSL)
-        !
-        CALL zhpev(21, wp1, wr, z, m, m, f2, 4*m)
-        !
-        ierr1 = 0
-        !
-#else   
-        !    
         CALL zhpev('V','U',m,wp1,wr,z,m,f1,f2,ierr)
-        !  
-#endif
-
         IF (ierr.NE.0) STOP 'failed to diagonalize W!'
 
      ELSE
@@ -2604,12 +2620,7 @@ SUBROUTINE wfsteep( m, Omat, Umat, b1, b2, b3 )
            END DO
         END DO
 
-#if defined __ESSL
-        CALL zhpev(21, wp1, wr, z, m, m, f2, 4*m)
-        ierr1 = 0
-#else
         CALL zhpev('V','U',m,wp1,wr,z,m,f1,f2,ierr)
-#endif
         IF (ierr.NE.0) STOP 'failed to diagonalize W!'
 
         maxdt=maxwfdt
@@ -2761,7 +2772,7 @@ SUBROUTINE wfsteep( m, Omat, Umat, b1, b2, b3 )
      END IF
      !
      IF( sp < 0.D0 ) &
-        CALL errore( 'cp-wf', 'Something wrong WF Spread negative', 1 )
+        CALL errore( 'cp-wf', 'Something wrong WF Spread negative', 2 )
      !
      spread=spread+sp
      !
@@ -3137,8 +3148,8 @@ END SUBROUTINE jacobi_rotation
           call distribute_lambda(X2, tmpr, descla(iss))
           call distribute_lambda(X3, tmpi, descla(iss))
       
-          Oc(:,:,inw) = DCMPLX(X2,X3)
-          Ol(:,:,inw) = DCMPLX(tmpr,tmpi)
+          Oc(:,:,inw) = CMPLX(X2,X3, KIND=dp)
+          Ol(:,:,inw) = CMPLX(tmpr,tmpi, KIND=dp)
        enddo
       
        Ocold = Oc
@@ -3198,7 +3209,7 @@ END SUBROUTINE jacobi_rotation
              call collect_lambda(X2, tmpr, descla(iss) )
              call collect_lambda(X3, tmpi, descla(iss))
    
-             Oc(:,:,inw)=CMPLX(X2,X3)
+             Oc(:,:,inw)=CMPLX(X2,X3,KIND=dp)
           ENDDO
    
 !======================================================================
@@ -3210,7 +3221,7 @@ END SUBROUTINE jacobi_rotation
              myt0=myt0+DBLE(CONJG(Oc( i, i, inw))*Oc( i, i, inw))
           END DO
        END DO
-#ifdef __MPI
+#if defined(__MPI)
        CALL mpi_allreduce (myt0, t0, 1, MPI_DOUBLE_PRECISION, MPI_SUM, &
                            intra_image_comm, ierr)
 #else
@@ -3262,7 +3273,7 @@ END SUBROUTINE jacobi_rotation
         END IF
         !
         IF ( sp < 0.D0 ) &
-           CALL errore( 'cp-wf', 'Something wrong WF Spread negative', 1 )  
+           CALL errore( 'cp-wf', 'Something wrong WF Spread negative', 3 )  
         spread=spread+sp
      END DO
 

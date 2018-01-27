@@ -1,88 +1,94 @@
 #!/bin/sh -x
 
-#tempdir=$HOME/Downloads
-tempdir=/tmp
-version=5.3.0
+version=6.2.1
+revision=14038
+user=giannozz
+tempdir=$HOME/tempdir
 
-# make sure there is no locale setting creating unneeded differences.
+# Make sure there is no locale setting creating unneeded differences.
 LC_ALL=C
 export LC_ALL
 
-mkdir $tempdir
+# work in $tempdir/qe-$version
 cd $tempdir
-/bin/rm -rf espresso/ espresso-$version
-# get the svn copy
-svn checkout http://qeforge.qe-forge.org/svn/q-e/tags/QE-5.3.0/espresso
-mv espresso/ espresso-$version/
 
-cd espresso-$version
+# Get the svn copy via tag (or branch)
+svn checkout svn+ssh://qeforge.qe-forge.org/svnroot/q-e/branches/QE-$version qe-$version
+# -OR- get the svn copy via revision checkout
+#svn checkout -r$revision svn+ssh://$user@qeforge.qe-forge.org/svnroot/q-e/trunk/espresso qe-$version
+cd qe-$version
 
-# generate version.f90 (requires svn files)
-touch make.sys
-cd Modules
-make version.f90
-# save version.f90 (make veryclean removes it)
-mv version.f90 ..
+# Following operations require make.inc and svn files
+touch make.inc
+
+# Generate version.f90
+cd Modules/
+make version
+/bin/rm version.f90.in
 cd ..
 
-# remove all .svn directories, clean
-find . -type d -name .svn -exec /bin/rm -rf {} \;
-make veryclean
-rm archive/plumed-1.3-qe.tar.gz archive/PLUMED-latest.tar.gz
-
-# restore version.f90 
-mv version.f90 Modules/
-
-# generate documentation - NOTA BENE:
-# in order to build the .html and .txt documentation in Doc, 
+# Generate documentation - NOTA BENE:
+# in order to build the .html and .txt documentation in Doc,
 # "tcl", "tcllib", "xsltproc" are needed
 # in order to build the .pdf files in Doc, "pdflatex" is needed
 # in order to build html files for user guide and developer manual,
 # "latex2html" and "convert" (from Image-Magick) are needed
 
-touch make.sys
-make doc
+make doc VERSION=$version
 
-# generate PWGUI
+# Generate PWGUI
+make tar-gui PWGUI_VERSION=$version
+mv PWgui-$version.tgz ../qe-$version-PWgui.tar.gz
 
-make tar-gui PWGUI_VERSION=$version 
-tar -xzvf PWgui-$version.tgz
-/bin/rm PWgui-$version.tgz
+# Generate QE-modes (requires tcllib, emacs, texlive-upquote)
+make tar-qe-modes VERSION=$version
+mv QE-modes-$version.tar.gz ../qe-$version-emacs_modes.tar.gz
 
+# Move out svn directories, unneeded files, packages not to be packaged
+/bin/rm .??* TODO archive/plumed-1.3-qe.tar.gz
+/bin/rm -rf .svn/ QHA/ PlotPhon/ West/ GIPAW/ GUI/
+
+# Update reference outputs on test-suite
+cd test-suite/
+for file in */benchmark.out*; do
+    file2=`echo $file | sed 's/SVN/$version'`
+    mv $file $file2
+done
 cd ..
 
-# core espresso
+# Package test-suite
+cp License test-suite/
+tar -czvf ../qe-$version-test-suite.tar.gz test-suite
+/bin/rm -rf test-suite
 
-tar -czvf espresso-$version.tar.gz espresso-$version/archive \
-                                   espresso-$version/clib \
-                                   espresso-$version/configure \
-                                   espresso-$version/COUPLE \
-                                   espresso-$version/CPV \
-                                   espresso-$version/dev-tools \
-                                   espresso-$version/Doc \
-                                   espresso-$version/environment_variables \
-                                   espresso-$version/flib \
-                                   espresso-$version/Makefile \
-                                   espresso-$version/include \
-                                   espresso-$version/install \
-                                   espresso-$version/License \
-                                   espresso-$version/Modules \
-                                   espresso-$version/PP \
-                                   espresso-$version/pseudo \
-                                   espresso-$version/PW \
-                                   espresso-$version/README \
-                                   espresso-$version/upftools
-#
-# Packages, ready for automatic unpacking
+# Package example
+tar -czvf ../qe-$version-examples.tar.gz License */Examples */examples */*/examples
+/bin/rm -rf */Examples */examples */*/examples
 
-cd espresso-$version
-tar -cvzf ../PWgui-$version.tar.gz    PWgui-$version
-tar -czvf ../PHonon-$version.tar.gz   PHonon PlotPhon QHA
-tar -czvf ../neb-$version.tar.gz      NEB
-tar -czvf ../pwcond-$version.tar.gz   PWCOND
-tar -czvf ../xspectra-$version.tar.gz XSpectra
-tar -czvf ../GWW-$version.tar.gz      GWW
-#tar -czvf ../GIPAW-$version.tar.gz    GIPAW
-tar -czvf ../tddfpt-$version.tar.gz   TDDFPT
-tar -czvf ../atomic-$version.tar.gz   atomic
-tar -czvf ../test-suite-$version.tar.gz test-suite
+# Package sources (in directory qe-$version)
+cd ..
+tar -czvf qe-$version.tar.gz qe-$version
+cd qe-$version
+
+# Prepare documentation for upload
+cd Doc/
+/bin/rm *.xml *.txt *.html
+cp ../*/Doc/*.html ../*/Doc/*.txt .
+
+cp ../PW/Doc/user_guide.pdf ./pw_user_guide.pdf
+cp ../CPV/Doc/user_guide.pdf ./cp_user_guide.pdf
+cp ../PP/Doc/user_guide.pdf ./pp_user_guide.pdf
+cp ../PHonon/Doc/user_guide.pdf ./ph_user_guide.pdf
+cp ../NEB/Doc/user_guide.pdf ./neb_user_guide.pdf
+cp ../atomic/Doc/pseudo-gen.pdf ./pseudo-gen.pdf
+
+cp -R ../PW/Doc/user_guide ./pw_user_guide
+cp -R ../CPV/Doc/user_guide ./cp_user_guide
+cp -R ../PP/Doc/user_guide ./pp_user_guide
+cp -R ../PHonon/Doc/user_guide ./ph_user_guide
+cp -R ../NEB/Doc/user_guide ./neb_user_guide
+cp -R ../atomic/Doc/pseudo-gen ./pseudo-gen
+
+echo Now copy "Docs" to QE website
+echo scp -R Doc user@site/wp-content/uploads/Doc-$version
+echo connect to the website and create/update symbolic link to "Doc-$version"

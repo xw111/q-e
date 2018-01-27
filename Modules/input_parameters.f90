@@ -5,6 +5,10 @@
 ! in the root directory of the present distribution,
 ! or http://www.gnu.org/copyleft/gpl.txt .
 !
+!---------------------------------------------
+! TB
+! included gate related stuff, search 'TB'
+!---------------------------------------------
 !
 !=----------------------------------------------------------------------------=!
 !
@@ -193,6 +197,11 @@ MODULE input_parameters
           ! if .TRUE. a sawtooth potential simulating a finite electric field
           ! is added to the local potential = only used in PW
 
+          ! TB - added gate also below to the namelist
+        LOGICAL :: gate = .FALSE.
+          ! if .TRUE. a charged plate in charged systems is added with a
+          ! total charge which is opposite to the charge of the system
+
           LOGICAL :: tefield2  = .false.
           ! if .TRUE. a second finite electric field is added to the local potential
           ! only used in CP
@@ -210,12 +219,6 @@ MODULE input_parameters
 
         LOGICAL :: lberry = .false.
           ! if .TRUE., use modern theory of the polarization
-
-        LOGICAL :: lcalc_z2 = .false.
-          ! if .TRUE., calculate Z2 without inversion symmetry
-
-        REAL(DP) :: z2_m_threshold = 0.8d0, z2_z_threshold = 0.05d0
-          ! threshold for realizing the parallel transport gauge
 
         INTEGER :: gdir = 0
           ! G-vector for polarization calculation ( related to lberry )
@@ -282,8 +285,7 @@ MODULE input_parameters
           gdir, nppstr, wf_collect, lelfield, nberrycyc, refg,            &
           tefield2, saverho, tabps, lkpoint_dir, use_wannier, lecrpa,     &
           tqmmm, vdw_table_name, lorbm, memory, point_label_type,         &
-          lcalc_z2, z2_m_threshold, z2_z_threshold, lfcpopt, lfcpdyn,     &
-          input_xml_schema_file                                                  
+          lfcpopt, lfcpdyn, input_xml_schema_file, gate                                        
 !
 !=----------------------------------------------------------------------------=!
 !  SYSTEM Namelist Input Parameters
@@ -371,6 +373,7 @@ MODULE input_parameters
           ! (do not) use symmetry, q => -q symmetry in k-point generation
         LOGICAL :: nosym_evc = .false.
           ! if .true. use symmetry only to symmetrize k points
+
         LOGICAL :: force_symmorphic = .false.
           ! if .true. disable fractionary translations (nonsymmorphic groups)
         LOGICAL :: use_all_frac = .false.
@@ -385,6 +388,9 @@ MODULE input_parameters
           ! Variable used to overwrite dft definition contained in
           ! pseudopotential files; 'none' means DFT is read from pseudos.
           ! Only used in PW - allowed values: any legal DFT value
+
+        REAL(DP) :: starting_charge( nsx ) = 0.0_DP
+          ! ONLY PW
 
         REAL(DP) :: starting_magnetization( nsx ) = 0.0_DP
           ! ONLY PW
@@ -434,6 +440,10 @@ MODULE input_parameters
         REAL(DP) :: conv_thr_init = 0.001_DP
         REAL(DP) :: conv_thr_multi = 0.1_DP
         REAL(DP) :: ecutfock = -1.d0
+          ! variables used in Lin Lin's ACE and SCDM
+        REAL(DP) :: localization_thr = 0.0_dp, scdmden=0.10d0, scdmgrd=0.20d0
+        LOGICAL  :: scdm=.FALSE.
+        LOGICAL  :: ace=.TRUE.
 
           ! parameters for external electric field
         INTEGER  :: edir = 0
@@ -441,9 +451,20 @@ MODULE input_parameters
         REAL(DP) :: eopreg = 0.0_DP
         REAL(DP) :: eamp = 0.0_DP
 
+          ! TB parameters for charged plate representing the gate
+          ! and a possible potential barrier
+          ! added also below to the namelist
+        REAL(DP) :: zgate = 0.5
+        LOGICAL  :: relaxz = .false.
+        LOGICAL  :: block = .false.
+        REAL(DP) :: block_1 = 0.45
+        REAL(DP) :: block_2 = 0.55
+        REAL(DP) :: block_height = 0.1
+
           ! Various parameters for noncollinear calculations
         LOGICAL  :: noncolin = .false.
         LOGICAL  :: lspinorb = .false.
+        LOGICAL  :: lforcet=.FALSE.
         LOGICAL  :: starting_spin_angle=.FALSE.
         REAL(DP) :: lambda = 1.0_DP
         REAL(DP) :: fixed_magnetization(3) = 0.0_DP
@@ -488,9 +509,22 @@ MODULE input_parameters
           ! other DFT-D parameters ( see Modules/mm_dispersion.f90 )
           ! london_s6 = default global scaling parameter for PBE
           ! london_c6 = user specified atomic C6 coefficients
+          ! london_rvdw = user specified atomic vdw radii
         REAL ( DP ) :: london_s6   =   0.75_DP , &
                        london_rcut = 200.00_DP , &
-                       london_c6( nsx ) = -1.0_DP
+                       london_c6( nsx ) = -1.0_DP, &
+                       london_rvdw( nsx ) = -1.0_DP
+
+          ! Grimme-D3 (DFT-D3) dispersion correction.
+          ! Values taken for PBE functional,
+          ! as found in original code of Grimme.
+        REAL ( DP ) :: dftd3_s6  =  1.0_DP ,&
+                       dftd3_rs6 =  1.217_DP ,&
+                       dftd3_s18 =  0.722_DP ,&
+                       dftd3_rs18 = 1.0_DP ,&
+                       dftd3_alp =  14.0_DP
+        integer  ::    dftd3_version = 3
+        logical ::     dftd3_threebody = .true.
 
         LOGICAL   :: ts_vdw = .false.
           ! OBSOLESCENT: same as vdw_corr='Tkatchenko-Scheffler'
@@ -534,19 +568,36 @@ MODULE input_parameters
           ! used to enable debug mode (output v_hartree and v_local)
 
         INTEGER :: esm_debug_gpmax = 0
-          ! if esm_debug is .TRUE., calcualte v_hartree and v_local
+          ! if esm_debug is .TRUE., calculate v_hartree and v_local
           ! for abs(gp)<=esm_debug_gpmax (gp is integer and has tpiba unit)
 
         REAL(DP) :: fcp_mu         = 0.0_DP
           ! target Fermi energy
+
         REAL(DP) :: fcp_mass       = 10000.0_DP
           ! mass for the FCP
+
         REAL(DP) :: fcp_tempw      = 300.0_DP
           ! target temperature for the FCP dynamics
+
+        CHARACTER(LEN=8) :: fcp_relax = 'lm'
+          ! 'lm':    line minimisation
+          ! 'mdiis': MDIIS algorithm
+
+        CHARACTER(len=8) :: fcp_relax_allowed(2)
+        DATA fcp_relax_allowed / 'lm', 'mdiis' /
+
         REAL(DP) :: fcp_relax_step = 0.5_DP
           ! step size for steepest descent
+
         REAL(DP) :: fcp_relax_crit = 0.001_DP
           ! threshold for force acting on FCP
+
+        INTEGER :: fcp_mdiis_size = 4
+          ! size of MDIIS algorism
+
+        REAL(DP) :: fcp_mdiis_step = 0.2_DP
+          ! step width of MDIIS algorism
 
         INTEGER :: space_group = 0
           ! space group number for coordinates given in crystallographic form
@@ -570,29 +621,33 @@ MODULE input_parameters
         NAMELIST / system / ibrav, celldm, a, b, c, cosab, cosac, cosbc, nat, &
              ntyp, nbnd, ecutwfc, ecutrho, nr1, nr2, nr3, nr1s, nr2s,         &
              nr3s, nr1b, nr2b, nr3b, nosym, nosym_evc, noinv, use_all_frac,   &
-             force_symmorphic, starting_magnetization,                        &
+             force_symmorphic, starting_charge, starting_magnetization,       &
              occupations, degauss, nspin, ecfixed,                            &
              qcutz, q2sigma, lda_plus_U, lda_plus_u_kind,                     &
              Hubbard_U, Hubbard_J, Hubbard_alpha,                             &
              Hubbard_J0, Hubbard_beta,                                        &
              edir, emaxpos, eopreg, eamp, smearing, starting_ns_eigenvalue,   &
              U_projection_type, input_dft, la2F, assume_isolated,             &
-             nqx1, nqx2, nqx3, ecutfock,                                      &
+             nqx1, nqx2, nqx3, ecutfock, localization_thr, scdm, ace,         &
+             scdmden, scdmgrd,                                                &
              exxdiv_treatment, x_gamma_extrapolation, yukawa, ecutvcut,       &
              exx_fraction, screening_parameter, ref_alat,                     &
              noncolin, lspinorb, starting_spin_angle, lambda, angle1, angle2, &
-             report,              &
+             report, lforcet,                                                 &
              constrained_magnetization, B_field, fixed_magnetization,         &
              sic, sic_epsilon, force_pairing, sic_alpha,                      &
              tot_charge, tot_magnetization, spline_ps, one_atom_occupations,  &
-             vdw_corr, london, london_s6, london_rcut, london_c6,             &
+             vdw_corr, london, london_s6, london_rcut, london_c6, london_rvdw,&
+             dftd3_s6, dftd3_rs6, dftd3_s18, dftd3_rs18, dftd3_alp,           &
+             dftd3_version,                                                   &
              ts_vdw, ts_vdw_isolated, ts_vdw_econv_thr,                       &
              xdm, xdm_a1, xdm_a2,                                             &
              step_pen, A_pen, sigma_pen, alpha_pen, no_t_rev,                 &
              esm_bc, esm_efield, esm_w, esm_nfit, esm_debug, esm_debug_gpmax, &
-             esm_a, esm_zb, fcp_mu, fcp_mass, fcp_tempw, fcp_relax_step,      &
-             fcp_relax_crit,                                                  &
-             space_group, uniqueb, origin_choice, rhombohedral
+             esm_a, esm_zb, fcp_mu, fcp_mass, fcp_tempw, fcp_relax,           &
+             fcp_relax_step, fcp_relax_crit, fcp_mdiis_size, fcp_mdiis_step,  &
+             space_group, uniqueb, origin_choice, rhombohedral,               &
+             zgate, relaxz, block, block_1, block_2, block_height
 
 !=----------------------------------------------------------------------------=!
 !  ELECTRONS Namelist Input Parameters
@@ -900,6 +955,12 @@ MODULE input_parameters
         LOGICAL :: tqr = .false.
           ! US contributions are added in real space
 
+        LOGICAL :: tq_smoothing = .false.
+          ! US augmentation charge is smoothed before use
+
+        LOGICAL :: tbeta_smoothing = .false.
+          ! beta function are smoothed before use
+
         LOGICAL :: occupation_constraints = .false.
           ! If true perform CP dynamics with constrained occupations
           ! to be used together with penalty functional ...
@@ -937,7 +998,8 @@ MODULE input_parameters
           diis_temp, diis_achmix, diis_g0chmix, diis_g1chmix,          &
           diis_nchmix, diis_nrot, diis_rothr, diis_ethr, diis_chguess, &
           mixing_mode, mixing_beta, mixing_ndim, mixing_fixed_ns,      &
-          tqr, diago_cg_maxiter, diago_david_ndim, diagonalization,    &
+          tqr, tq_smoothing, tbeta_smoothing,                          &
+          diago_cg_maxiter, diago_david_ndim, diagonalization,         &
           startingpot, startingwfc , conv_thr,                         &
           adaptive_thr, conv_thr_init, conv_thr_multi,                 &
           diago_thr_init, n_inner, fermi_energy, rotmass, occmass,     &
@@ -1102,6 +1164,13 @@ MODULE input_parameters
 
         REAL(DP)  :: w_1 = 0.5E-1_DP
         REAL(DP)  :: w_2 = 0.5_DP
+
+        LOGICAL :: l_mplathe=.false. !if true apply Muller Plathe strategy
+        INTEGER :: n_muller=0!number of intermediate sub-cells
+        INTEGER :: np_muller=1!period for velocity exchange
+        LOGICAL :: l_exit_muller=.false.!if true do muller exchange after last MD step
+
+        
         !
         NAMELIST / ions / ion_dynamics, iesr, ion_radius, ion_damping,         &
                           ion_positions, ion_velocities, ion_temperature,      &
@@ -1110,7 +1179,8 @@ MODULE input_parameters
                           refold_pos, upscale, delta_t, pot_extrapolation,     &
                           wfc_extrapolation, nraise, remove_rigid_rot,         &
                           trust_radius_max, trust_radius_min,                  &
-                          trust_radius_ini, w_1, w_2, bfgs_ndim
+                          trust_radius_ini, w_1, w_2, bfgs_ndim,l_mplathe,     &
+                          n_muller,np_muller,l_exit_muller
 
 
 !=----------------------------------------------------------------------------=!
@@ -1344,7 +1414,7 @@ MODULE input_parameters
 !
         REAL(DP), ALLOCATABLE :: rd_pos(:,:)  ! unsorted positions from input
         INTEGER,  ALLOCATABLE :: sp_pos(:)
-        INTEGER,  ALLOCATABLE :: if_pos(:,:)
+        INTEGER,  ALLOCATABLE :: rd_if_pos(:,:)
         INTEGER,  ALLOCATABLE :: na_inp(:)
         LOGICAL  :: tapos = .false.
         LOGICAL  :: lsg   = .false.
@@ -1478,7 +1548,7 @@ SUBROUTINE reset_input_checks()
     !
     IF ( allocated( rd_pos ) ) DEALLOCATE( rd_pos )
     IF ( allocated( sp_pos ) ) DEALLOCATE( sp_pos )
-    IF ( allocated( if_pos ) ) DEALLOCATE( if_pos )
+    IF ( allocated( rd_if_pos ) ) DEALLOCATE( rd_if_pos )
     IF ( allocated( na_inp ) ) DEALLOCATE( na_inp )
     IF ( allocated( rd_vel ) ) DEALLOCATE( rd_vel )
     IF ( allocated( sp_vel ) ) DEALLOCATE( sp_vel )
@@ -1486,7 +1556,7 @@ SUBROUTINE reset_input_checks()
     !
     ALLOCATE( rd_pos( 3, nat ) )
     ALLOCATE( sp_pos( nat)   )
-    ALLOCATE( if_pos( 3, nat ) )
+    ALLOCATE( rd_if_pos( 3, nat ) )
     ALLOCATE( na_inp( ntyp)  )
     ALLOCATE( rd_vel( 3, nat ) )
     ALLOCATE( sp_vel( nat)   )
@@ -1494,7 +1564,7 @@ SUBROUTINE reset_input_checks()
     !
     rd_pos = 0.0_DP
     sp_pos = 0
-    if_pos = 1
+    rd_if_pos = 1
     na_inp = 0
     rd_vel = 0.0_DP
     sp_vel = 0
@@ -1552,7 +1622,7 @@ SUBROUTINE reset_input_checks()
     IF ( allocated( wk ) ) DEALLOCATE( wk )
     IF ( allocated( rd_pos ) ) DEALLOCATE( rd_pos )
     IF ( allocated( sp_pos ) ) DEALLOCATE( sp_pos )
-    IF ( allocated( if_pos ) ) DEALLOCATE( if_pos )
+    IF ( allocated( rd_if_pos ) ) DEALLOCATE( rd_if_pos )
     IF ( allocated( na_inp ) ) DEALLOCATE( na_inp )
     IF ( allocated( rd_vel ) ) DEALLOCATE( rd_vel )
     IF ( allocated( sp_vel ) ) DEALLOCATE( sp_vel )

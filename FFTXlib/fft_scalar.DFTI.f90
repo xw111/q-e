@@ -6,35 +6,20 @@
 ! in the root directory of the present distribution,
 ! or http://www.gnu.org/copyleft/gpl.txt .
 !
-!--------------------------------------------------------------------------!
-! FFT scalar drivers Module - contains machine-dependent routines for      !
-! FFTW, FFTW3, ESSL (both 3d for serial execution and 1d+2d FFTs for       !
-! parallel execution; NEC ASL libraries (3d only, no parallel execution)   !
-! Written by Carlo Cavazzoni, modified by P. Giannozzi, contributions      !
-! by Martin Hilgemans, Guido Roma, Pascal Thibaudeau, Stephane Lefranc,    !
-! Nicolas Lacorne, Filippo Spiga, Nicola Varini - Last update Jul 2015     !
-!--------------------------------------------------------------------------!
-
 #if defined(__DFTI)
-
 #include "mkl_dfti.f90"
-
 !=----------------------------------------------------------------------=!
-   MODULE fft_scalar
+   MODULE fft_scalar_dfti
 !=----------------------------------------------------------------------=!
 
-       USE, intrinsic ::  iso_c_binding
        USE MKL_DFTI ! -- this can be found in the MKL include directory
+       USE fft_param
 
        IMPLICIT NONE
         SAVE
 
         PRIVATE
         PUBLIC :: cft_1z, cft_2xy, cfft3d, cfft3ds
-
-! ...   Local Parameter
-
-#include "fft_param.f90"
 
         TYPE dfti_descriptor_array
            TYPE(DFTI_DESCRIPTOR), POINTER :: desc
@@ -80,7 +65,7 @@
 
      INTEGER :: tid
 
-#if defined(__OPENMP)
+#if defined(_OPENMP)
      INTEGER :: offset, ldz_t
      INTEGER :: omp_get_max_threads
      EXTERNAL :: omp_get_max_threads
@@ -140,7 +125,7 @@
      END SUBROUTINE check_dims
 
      SUBROUTINE lookup()
-     IF( dfti_first .EQ. .TRUE. ) THEN
+     IF( dfti_first ) THEN
         DO ip = 1, ndims
            hand(ip)%desc => NULL()
         END DO
@@ -246,7 +231,7 @@
      LOGICAL :: dofft( nfftx ), found
      INTEGER, PARAMETER  :: stdout = 6
 
-#if defined(__OPENMP)
+#if defined(_OPENMP)
      INTEGER :: offset
      INTEGER :: nx_t, ny_t, nzl_t, ldx_t, ldy_t
      INTEGER  :: itid, mytid, ntids
@@ -321,7 +306,7 @@
      END SUBROUTINE check_dims
 
      SUBROUTINE lookup()
-     IF( dfti_first .EQ. .TRUE. ) THEN
+     IF( dfti_first ) THEN
         DO ip = 1, ndims
            hand(ip)%desc => NULL()
         END DO
@@ -403,8 +388,7 @@
 !
 !=----------------------------------------------------------------------=!
 !
-
-   SUBROUTINE cfft3d( f, nx, ny, nz, ldx, ldy, ldz, isign )
+   SUBROUTINE cfft3d( f, nx, ny, nz, ldx, ldy, ldz, howmany, isign )
 
   !     driver routine for 3d complex fft of lengths nx, ny, nz
   !     input  :  f(ldx*ldy*ldz)  complex, transform is in-place
@@ -414,17 +398,18 @@
   !      to reduce memory conflicts - not implemented for FFTW)
   !     isign > 0 : f(G) => f(R)   ; isign < 0 : f(R) => f(G)
   !
+  !     howmany: perform this many ffts, separated by ldx*ldy*ldz in memory
   !     Up to "ndims" initializations (for different combinations of input
   !     parameters nx,ny,nz) are stored and re-used if available
 
      IMPLICIT NONE
 
-     INTEGER, INTENT(IN) :: nx, ny, nz, ldx, ldy, ldz, isign
+     INTEGER, INTENT(IN) :: nx, ny, nz, ldx, ldy, ldz, howmany, isign
      COMPLEX (DP) :: f(:)
      INTEGER :: i, k, j, err, idir, ip
      REAL(DP) :: tscale
      INTEGER, SAVE :: icurrent = 1
-     INTEGER, SAVE :: dims(3,ndims) = -1
+     INTEGER, SAVE :: dims(4,ndims) = -1
 
      !   Intel MKL native FFT driver
 
@@ -458,7 +443,7 @@
         !
         dfti_status = DftiComputeForward(hand(ip)%desc, f(1:))
         IF(dfti_status /= 0)THEN
-           WRITE(*,*) "stopped in DftiComputeForward", dfti_status
+           WRITE(*,*) "stopped in cfft3d, DftiComputeForward", dfti_status
            STOP
         ENDIF
         !
@@ -466,7 +451,7 @@
         !
         dfti_status = DftiComputeBackward(hand(ip)%desc, f(1:))
         IF(dfti_status /= 0)THEN
-           WRITE(*,*) "stopped in DftiComputeBackward", dfti_status
+           WRITE(*,*) "stopped in cfft3d, DftiComputeBackward", dfti_status
            STOP
         ENDIF
         !
@@ -482,11 +467,13 @@
      IF ( ny < 1 ) &
          call fftx_error__('cfft3d',' ny is less than 1 ', 1)
      IF ( nz < 1 ) &
-         call fftx_error__('cfft3',' nz is less than 1 ', 1)
+         call fftx_error__('cfft3d',' nz is less than 1 ', 1)
+     IF ( howmany < 1 ) &
+         call fftx_error__('cfft3d',' howmany is less than 1 ', 1)
      END SUBROUTINE check_dims
 
      SUBROUTINE lookup()
-     IF( dfti_first .EQ. .TRUE. ) THEN
+     IF( dfti_first ) THEN
         DO ip = 1, ndims
            hand(ip)%desc => NULL()
         END DO
@@ -498,7 +485,8 @@
        !   for this combination of parameters
        IF ( ( nx == dims(1,i) ) .and. &
             ( ny == dims(2,i) ) .and. &
-            ( nz == dims(3,i) ) ) THEN
+            ( nz == dims(3,i) ) .and. &
+            ( howmany == dims(4,i) ) ) THEN
          ip = i
          EXIT
        END IF
@@ -509,46 +497,51 @@
       if( ASSOCIATED( hand(icurrent)%desc ) ) THEN
           dfti_status = DftiFreeDescriptor( hand(icurrent)%desc )
           IF( dfti_status /= 0) THEN
-             WRITE(*,*) "stopped in DftiFreeDescriptor", dfti_status
+             WRITE(*,*) "stopped in cfft3d, DftiFreeDescriptor", dfti_status
              STOP
           ENDIF
        END IF
 
        dfti_status = DftiCreateDescriptor(hand(icurrent)%desc, DFTI_DOUBLE, DFTI_COMPLEX, 3,(/nx,ny,nz/))
        IF(dfti_status /= 0) THEN
-          WRITE(*,*) "stopped in DftiCreateDescriptor", dfti_status
+          WRITE(*,*) "stopped in cfft3d, DftiCreateDescriptor", dfti_status
           STOP
        ENDIF
-       dfti_status = DftiSetValue(hand(icurrent)%desc, DFTI_NUMBER_OF_TRANSFORMS,1)
+       dfti_status = DftiSetValue(hand(icurrent)%desc, DFTI_NUMBER_OF_TRANSFORMS,howmany)
        IF(dfti_status /= 0)THEN
-          WRITE(*,*) "stopped in DFTI_NUMBER_OF_TRANSFORMS", dfti_status
+          WRITE(*,*) "stopped in cfft3d, DFTI_NUMBER_OF_TRANSFORMS", dfti_status
+          STOP
+       ENDIF
+       dfti_status = DftiSetValue(hand(icurrent)%desc, DFTI_INPUT_DISTANCE, ldx*ldy*ldz)
+       IF(dfti_status /= 0)THEN
+          WRITE(*,*) "stopped in cfft3dm, DFTI_INPUT_DISTANCE", dfti_status
           STOP
        ENDIF
        dfti_status = DftiSetValue(hand(icurrent)%desc, DFTI_PLACEMENT, DFTI_INPLACE)
        IF(dfti_status /= 0)THEN
-         WRITE(*,*) "stopped in DFTI_PLACEMENT", dfti_status
+         WRITE(*,*) "stopped in cfft3d, DFTI_PLACEMENT", dfti_status
          STOP
-      ENDIF
+       ENDIF
        tscale = 1.0_DP/ (nx * ny * nz)
        dfti_status = DftiSetValue( hand(icurrent)%desc, DFTI_FORWARD_SCALE, tscale);
        IF(dfti_status /= 0)THEN
-          WRITE(*,*) "stopped in DFTI_FORWARD_SCALE", dfti_status
+          WRITE(*,*) "stopped in cfft3d, DFTI_FORWARD_SCALE", dfti_status
           STOP
        ENDIF
        tscale = 1.0_DP
        dfti_status = DftiSetValue( hand(icurrent)%desc, DFTI_BACKWARD_SCALE, tscale );
        IF(dfti_status /= 0)THEN
-          WRITE(*,*) "stopped in DFTI_BACKWARD_SCALE", dfti_status
+          WRITE(*,*) "stopped in cfft3d, DFTI_BACKWARD_SCALE", dfti_status
           STOP
        ENDIF
 
        dfti_status = DftiCommitDescriptor(hand(icurrent)%desc)
        IF(dfti_status /= 0) THEN
-          WRITE(*,*) "stopped in DftiCreateDescriptor", dfti_status
+          WRITE(*,*) "stopped in cfft3d, DftiCreateDescriptor", dfti_status
           STOP
        ENDIF
 
-       dims(1,icurrent) = nx; dims(2,icurrent) = ny; dims(3,icurrent) = nz
+       dims(1,icurrent) = nx; dims(2,icurrent) = ny; dims(3,icurrent) = nz; dims(4,icurrent) = howmany
        ip = icurrent
        icurrent = MOD( icurrent, ndims ) + 1
      END SUBROUTINE init_dfti
@@ -567,21 +560,21 @@
 !=----------------------------------------------------------------------=!
 !
 
-SUBROUTINE cfft3ds (f, nx, ny, nz, ldx, ldy, ldz, isign, do_fft_x, do_fft_y)
+SUBROUTINE cfft3ds (f, nx, ny, nz, ldx, ldy, ldz, howmany, isign, do_fft_z, do_fft_y)
   !
   implicit none
 
-  integer :: nx, ny, nz, ldx, ldy, ldz, isign
+  integer :: nx, ny, nz, ldx, ldy, ldz, isign, howmany
   !
   complex(DP) :: f ( ldx * ldy * ldz )
-  integer :: do_fft_x(:), do_fft_y(:)
+  integer :: do_fft_y(:), do_fft_z(:)
   !
-  CALL cfft3d (f, nx, ny, nz, ldx, ldy, ldz, isign)
+  CALL cfft3d (f, nx, ny, nz, ldx, ldy, ldz, howmany, isign)
 
 END SUBROUTINE cfft3ds
-
-!=----------------------------------------------------------------------=!
-   END MODULE fft_scalar
-!=----------------------------------------------------------------------=!
-
+#else
+   MODULE fft_scalar_dfti
 #endif
+!=----------------------------------------------------------------------=!
+END MODULE fft_scalar_dfti
+!=----------------------------------------------------------------------=!

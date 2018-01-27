@@ -26,7 +26,7 @@
       use cell_base,            only: ainv, at, omega, alat
       use small_box,            only: small_box_set
       use smallbox_grid_dim,    only: smallbox_grid_init,smallbox_grid_info
-      USE grid_subroutines,     ONLY: realspace_grid_init, realspace_grids_info
+      USE fft_types,            ONLY: fft_type_init
       use ions_base,            only: nat
       USE recvec_subs,          ONLY: ggen
       USE gvect,                ONLY: mill_g, eigts1,eigts2,eigts3, gg, &
@@ -34,9 +34,9 @@
       use gvecs,                only: gcutms, gvecs_init
       use gvecw,                only: gkcut, gvecw_init, g2kin_init
       USE smallbox_subs,        ONLY: ggenb
-      USE fft_base,             ONLY: dfftp, dffts, dfftb, dfft3d
+      USE fft_base,             ONLY: dfftp, dffts, dfftb, fft_base_info
       USE fft_smallbox,         ONLY: cft_b_omp_init
-      USE stick_set,            ONLY: pstickset
+      USE fft_base,             ONLY: smap
       USE control_flags,        ONLY: gamma_only, smallmem
       USE electrons_module,     ONLY: bmeshset
       USE electrons_base,       ONLY: distribute_bands
@@ -53,7 +53,13 @@
       integer  :: i
       real(dp) :: rat1, rat2, rat3
       real(dp) :: bg(3,3), tpiba2 
-      integer :: ng_, ngs_, ngm_ , ngw_ 
+      integer :: ng_, ngs_, ngm_ , ngw_, nyfft_
+#if defined(__MPI)
+      LOGICAL :: lpara = .true.
+#else
+      LOGICAL :: lpara = .false.
+#endif
+
 
       CALL start_clock( 'init_dim' )
 
@@ -82,6 +88,10 @@
       h_init=at*alat
 
       ! ... Initialize FFT real-space grids and small box grid
+      nyfft_ = ntask_groups
+      dffts%have_task_groups = (ntask_groups >1)
+      dfftp%have_task_groups = .FALSE.
+      lpara = ( nproc_bgrp > 1 )
       !
       IF ( ref_cell ) THEN
         !
@@ -93,17 +103,16 @@
         WRITE( stdout,'(3X,"ref_cell_a2 =",1X,3f14.8,3x,"ref_cell_b2 =",3f14.8)') ref_at(:,2)*ref_alat,ref_bg(:,2)/ref_alat
         WRITE( stdout,'(3X,"ref_cell_a3 =",1X,3f14.8,3x,"ref_cell_b3 =",3f14.8)') ref_at(:,3)*ref_alat,ref_bg(:,3)/ref_alat
         !
-        CALL realspace_grid_init( dfftp, ref_at, ref_bg, gcutm )
-        CALL realspace_grid_init( dffts, ref_at, ref_bg, gcutms)
-        CALL realspace_grid_init( dfft3d, ref_at, ref_bg, gcutms)
+        CALL fft_type_init( dffts, smap, "wave", gamma_only, lpara, intra_bgrp_comm, ref_at, ref_bg, gkcut, nyfft=nyfft_ )
+        CALL fft_type_init( dfftp, smap, "rho", gamma_only, lpara, intra_bgrp_comm, ref_at, ref_bg,  gcutm, nyfft=nyfft_ )
         !
       ELSE
         !
-        CALL realspace_grid_init( dfftp, at, bg, gcutm )
-        CALL realspace_grid_init( dffts, at, bg, gcutms)
-        CALL realspace_grid_init( dfft3d, at, bg, gcutms)
+        CALL fft_type_init( dffts, smap, "wave", gamma_only, lpara, intra_bgrp_comm, at, bg, gkcut, nyfft=nyfft_ )
+        CALL fft_type_init( dfftp, smap, "rho", gamma_only, lpara, intra_bgrp_comm, at, bg,  gcutm, nyfft=nyfft_ )
         !
       END IF
+      !
       !
       CALL smallbox_grid_init( dfftp, dfftb )
 
@@ -131,15 +140,17 @@
       !       (but only if the axis triplet is right-handed, otherwise
       !        for a left-handed triplet, ainv is minus the inverse of a)
       !
+      CALL fft_base_info( ionode, stdout )
+      !!CALL fft_extra_info()
+      ngw_ = dffts%nwl( dffts%mype + 1 )
+      ngs_ = dffts%ngl( dffts%mype + 1 )
+      ngm_ = dfftp%ngl( dfftp%mype + 1 )
+      IF( gamma_only ) THEN
+         ngw_ = (ngw_ + 1)/2
+         ngs_ = (ngs_ + 1)/2
+         ngm_ = (ngm_ + 1)/2
+      END IF
 
-      ! ... set the sticks mesh and distribute g vectors among processors
-      ! ... pstickset lso sets the local real-space grid dimensions
-      !
-
-      CALL pstickset( gamma_only, bg, gcutm, gkcut, gcutms, &
-        dfftp, dffts, ngw_ , ngm_ , ngs_ , me_bgrp, root_bgrp, &
-        nproc_bgrp, intra_bgrp_comm, ntask_groups, ionode, stdout, dfft3d )
-      !
       !
       ! ... Initialize reciprocal space local and global dimensions
       !     NOTE in a parallel run ngm_ , ngw_ , ngs_ here are the 
@@ -150,7 +161,7 @@
       !
       ! ... Print real-space grid dimensions
       !
-      CALL realspace_grids_info ( dfftp, dffts, nproc_bgrp )
+      CALL realspace_grids_info ( dfftp, dffts )
       CALL smallbox_grid_info ( dfftb )
       !
       ! ... generate g-space vectors (dense and smooth grid)
@@ -210,7 +221,7 @@
          !
          CALL ggenb ( ecutrho, iverbosity )
          !
-#if defined __OPENMP
+#if defined _OPENMP
          CALL cft_b_omp_init( dfftb%nr1, dfftb%nr2, dfftb%nr3 )
 #endif
       ELSE IF( okvan .OR. nlcc_any ) THEN
@@ -236,7 +247,24 @@
       CALL stop_clock( 'init_dim' )
       !
       return
-      end subroutine init_dimensions
+
+   CONTAINS
+
+      SUBROUTINE fft_extra_info()
+         INTEGER :: ir
+         IF(ionode) THEN
+            WRITE(stdout,*) 'FFT parallelization for potentials'
+            WRITE(stdout,*) dfftp%nproc, dfftp%nproc2, dfftp%nproc3
+            WRITE(stdout,*) 'FFT parallelization for smooth grid'
+            WRITE(stdout,*) dffts%nproc, dffts%nproc2, dffts%nproc3
+         END IF
+         WRITE(1000+dfftp%mype,*) dfftp%nr1x, dfftp%nr2x
+         DO ir = 1, dfftp%nr1x * dfftp%nr2x
+            WRITE(1000+dfftp%mype,*) dfftp%isind( ir )
+         END DO
+      END SUBROUTINE fft_extra_info
+
+   END SUBROUTINE init_dimensions
 
 
 
@@ -254,12 +282,17 @@
       use cell_base,        only: at, alat, r_to_s, cell_init, deth
       use cell_base,        only: ibrav, ainv, h, hold, tcell_base_init
       USE ions_positions,   ONLY: allocate_ions_positions, tau0, taus
+#if defined (__OLDXML)
       use cp_restart,       only: cp_read_cell
+#else
+      use cp_restart_new,   only: cp_read_cell
+#endif
       USE fft_base,         ONLY: dfftb
-      USE fft_types,        ONLY: fft_box_allocate
+      USE fft_smallbox_type,      ONLY: fft_box_allocate
       USE cp_main_variables,ONLY: ht0, htm, taub
       USE cp_interfaces,    ONLY: newinit
       USE constants,        ONLY: amu_au
+      USE matrix_inversion
 
       implicit none
       !
@@ -427,3 +460,62 @@
       !
       return
     end subroutine newinit_x
+
+    SUBROUTINE realspace_grids_info ( dfftp, dffts )
+
+      !  Print info on local and global dimensions for real space grids
+
+      USE fft_types, ONLY: fft_type_descriptor
+      use io_global, only: stdout, ionode
+      USE fft_helper_subroutines
+
+      IMPLICIT NONE
+
+
+      TYPE(fft_type_descriptor), INTENT(IN) :: dfftp, dffts
+
+      INTEGER :: i, j, nr3l
+
+      IF(ionode) THEN
+
+        CALL tg_get_local_nr3( dfftp, nr3l )
+
+        WRITE( stdout,*)
+        WRITE( stdout,*) '  Real Mesh'
+        WRITE( stdout,*) '  ---------'
+        WRITE( stdout,1000) dfftp%nr1, dfftp%nr2, dfftp%nr3, &
+                            dfftp%nr1, dfftp%my_nr2p, dfftp%my_nr3p, &
+                            1, dfftp%nproc2, dfftp%nproc3
+        WRITE( stdout,1010) dfftp%nr1x, dfftp%nr2x, dfftp%nr3x
+        WRITE( stdout,1020) dfftp%nnr
+        WRITE( stdout,*) '  Number of x-y planes for each processors: '
+        WRITE( stdout, fmt = '( 5("  |",I4,",",I4) )' ) ( ( dfftp%nr2p(j), &
+                dfftp%nr3p(i), i = 1, dfftp%nproc3 ), j=1,dfftp%nproc2 )
+
+        CALL tg_get_local_nr3( dffts, nr3l )
+
+        WRITE( stdout,*)
+        WRITE( stdout,*) '  Smooth Real Mesh'
+        WRITE( stdout,*) '  ----------------'
+        WRITE( stdout,1000) dffts%nr1, dffts%nr2, dffts%nr3, &
+                            dffts%nr1, dffts%my_nr2p, dffts%my_nr3p, &
+                            1, dffts%nproc2, dffts%nproc3
+        WRITE( stdout,1010) dffts%nr1x, dffts%nr2x, dffts%nr3x
+        WRITE( stdout,1020) dffts%nnr
+        WRITE( stdout,*) '  Number of x-y planes for each processors: '
+        WRITE( stdout, fmt = '( 5("  |",I4,",",I4) )' ) ( ( dffts%nr2p(j), &
+                dffts%nr3p(i), i = 1, dffts%nproc3 ), j=1,dffts%nproc2 )
+
+      END IF
+
+1000  FORMAT(3X, &
+         'Global Dimensions   Local  Dimensions   Processor Grid',/,3X, &
+         '.X.   .Y.   .Z.     .X.   .Y.   .Z.     .X.   .Y.   .Z.',/, &
+         3(1X,I5),2X,3(1X,I5),2X,3(1X,I5) )
+1010  FORMAT(3X, 'Array leading dimensions ( nr1x, nr2x, nr3x )   = ', 3(1X,I5))
+1020  FORMAT(3X, 'Local number of cell to store the grid ( nrxx ) = ', 1X, I9 )
+
+      RETURN
+      END SUBROUTINE realspace_grids_info
+
+

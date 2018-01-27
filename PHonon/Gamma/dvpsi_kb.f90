@@ -7,7 +7,7 @@
 !
 !
 !----------------------------------------------------------------------
-SUBROUTINE dvpsi_kb(kpoint,nu)
+SUBROUTINE dvpsi_kb(ik,nu)
   !----------------------------------------------------------------------
   ! calculates dVion/dtau * psi and stores it in dvpsi
   !
@@ -16,6 +16,7 @@ SUBROUTINE dvpsi_kb(kpoint,nu)
   USE atom,       ONLY: rgrid
   USE becmod,     ONLY: calbec
   USE cell_base,  ONLY: omega, tpiba, tpiba2
+  USE klist,      ONLY: ngk
   USE ions_base,  ONLY: ntyp => nsp, nat, ityp, tau
   USE uspp_param, ONLY: upf, nh, nhm
   USE uspp,       ONLY: dvan, nkb, vkb
@@ -23,12 +24,13 @@ SUBROUTINE dvpsi_kb(kpoint,nu)
   USE fft_interfaces, ONLY : invfft
   USE gvect,      ONLY : gstart, nl, nlm, ngl, ngm, g, gg, gl, igtongl
   USE vlocal,     ONLY: vloc
-  USE wvfct,      ONLY: nbnd, npwx, npw, g2kin, igk
+  USE wvfct,      ONLY: nbnd, npwx
   USE wavefunctions_module,  ONLY: evc, psic
   USE cgcom
   !
   IMPLICIT NONE
-  INTEGER :: ibnd, ir, ih, jkb, ik, na, nu, ng, mu, nt, kpoint
+  INTEGER :: ik, nu
+  INTEGER :: npw, ibnd, ir, ih, jkb, ig, na, ng, mu, nt
   COMPLEX(DP), POINTER:: work(:,:), dvloc(:), dvb_cc(:)
   COMPLEX(DP) :: exc
   real(DP), POINTER :: bec1(:,:), bec2(:,:), rhocg(:), dv(:)
@@ -88,6 +90,8 @@ SUBROUTINE dvpsi_kb(kpoint,nu)
   !
   !   vloc_psi calculates dVloc/dtau*psi(G)
   !
+  npw = ngk(ik)
+  !
   dvpsi(:,:) = (0.d0, 0.d0)
   CALL vloc_psi_gamma(npwx, npw, nbnd, evc, dv, dvpsi)
   !
@@ -108,11 +112,11 @@ SUBROUTINE dvpsi_kb(kpoint,nu)
               !  second term: sum_l sum_G' [-i (G*u) V_l(G) V^*_l(G') psi(G')
               !
               DO ih = 1,nh(nt)
-                 DO ik = 1,npw
-                    work(ik,ih) = vkb(ik,jkb+ih) * cmplx(0.d0,-1.d0,kind=DP) * &
-                                    (tpiba*( g(1,igk(ik))*u(mu+1,nu) +  &
-                                             g(2,igk(ik))*u(mu+2,nu) +  &
-                                             g(3,igk(ik))*u(mu+3,nu) ) )
+                 DO ig = 1,npw
+                    work(ig,ih) = vkb(ig,jkb+ih) * cmplx(0.d0,-1.d0,kind=DP) * &
+                                    (tpiba*( g(1,ig)*u(mu+1,nu) +  &
+                                             g(2,ig)*u(mu+2,nu) +  &
+                                             g(3,ig)*u(mu+3,nu) ) )
                  ENDDO
               ENDDO
               !

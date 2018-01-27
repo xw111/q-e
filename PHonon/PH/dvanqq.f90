@@ -34,13 +34,17 @@ subroutine dvanqq
   USE uspp, ONLY: okvan, ijtoh
   USE uspp_param, ONLY: upf, lmaxq, nh
 
-  USE phus, ONLY : int1, int2, int4, int4_nc, int5, int5_so
-  USE eqv, ONLY : vlocq
-  USE qpoint, ONLY : eigqts, xq
-  USE control_ph, ONLY : rec_code_read, lgamma
-
   USE mp_bands, ONLY: intra_bgrp_comm
   USE mp,        ONLY: mp_sum
+  USE Coul_cut_2D, ONLY: do_cutoff_2D 
+  USE Coul_cut_2D_ph, ONLY: lr_Vlocq  
+
+  USE phus, ONLY : int1, int2, int4, int4_nc, int5, int5_so
+  USE control_ph, ONLY : rec_code_read
+
+  USE eqv,        ONLY : vlocq
+  USE qpoint,     ONLY : eigqts, xq
+  USE control_lr, ONLY : lgamma
 
   implicit none
   !
@@ -155,11 +159,22 @@ subroutine dvanqq
                        !    nb is the atom of the augmentation function
                        !
                        nta = ityp (na)
-                       do ig=1, ngm
-                          sk(ig)=vlocq(ig,nta) * eigts1(mill(1,ig), na) &
+                       !  
+                       IF (do_cutoff_2D) THEN
+                          do ig=1, ngm
+                             sk(ig)=(vlocq(ig,nta)+lr_Vlocq (ig, nta)) &
+                                               * eigts1(mill(1,ig), na) &
                                                * eigts2(mill(2,ig), na) &
                                                * eigts3(mill(3,ig), na)
-                       enddo
+                          enddo
+                       ELSE
+                          do ig=1, ngm
+                             sk(ig)=vlocq(ig,nta) * eigts1(mill(1,ig), na) &
+                                                  * eigts2(mill(2,ig), na) &
+                                                  * eigts3(mill(3,ig), na)
+                           enddo
+                       ENDIF
+                       ! 
                        do ipol = 1, 3
                           do ig=1, ngm
                             aux5(ig)= sk(ig) * (g (ipol, ig) + xq (ipol) )

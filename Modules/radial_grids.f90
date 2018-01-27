@@ -149,17 +149,11 @@ END TYPE radial_grid_type
 !---------------------------------------------------------------
       type(radial_grid_type),intent(inout) :: grid(:)
       integer :: n
-       do n = 1,size(grid)
-         if (associated(grid(n)%r))   deallocate(grid(n)%r)
-         if (associated(grid(n)%r2))  deallocate(grid(n)%r2)
-         if (associated(grid(n)%rab)) deallocate(grid(n)%rab)
-         if (associated(grid(n)%sqr)) deallocate(grid(n)%sqr)
-         if (associated(grid(n)%rm1)) deallocate(grid(n)%rm1)
-         if (associated(grid(n)%rm2)) deallocate(grid(n)%rm2)
-         if (associated(grid(n)%rm3)) deallocate(grid(n)%rm3)
-         grid(n)%mesh = 0
-       enddo
-       !deallocate(grid)
+
+      do n = 1,size(grid)
+         call deallocate_radial_grid_s(grid(n))
+      enddo
+      
       end subroutine deallocate_radial_grid_v
 
 !---------------------------------------------------------------
@@ -437,7 +431,7 @@ end subroutine series
 !
 !----------------------------------------------------------------------
 subroutine write_grid_on_file(iunit,grid)
-!  use radial_grids, only: radial_grid_type
+
   implicit none
   type(radial_grid_type), intent(in) :: grid
   integer, intent(in) :: iunit
@@ -455,9 +449,9 @@ subroutine write_grid_on_file(iunit,grid)
 end subroutine write_grid_on_file
 
 subroutine read_grid_from_file(iunit,grid)
-!  use radial_grids, only: radial_grid_type
+
   implicit none
-  type(radial_grid_type), intent(out) :: grid
+  type(radial_grid_type), intent(inout) :: grid
   integer, intent(in) :: iunit
   integer :: n
 !

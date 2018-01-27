@@ -1,5 +1,5 @@
 !
-! Copyright (C) 2001-2015 Quantum ESPRESSO group
+! Copyright (C) 2001-2016 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -30,7 +30,7 @@ SUBROUTINE lr_calc_dens( evc1, response_calc )
   USE fft_interfaces,         ONLY : invfft
   USE io_global,              ONLY : stdout
   USE kinds,                  ONLY : dp
-  USE klist,                  ONLY : nks,xk,wk
+  USE klist,                  ONLY : nks, xk, wk, ngk, igk_k
   USE lr_variables,           ONLY : evc0,revc0,rho_1,lr_verbosity,&
                                      & charge_response, itermax,&
                                      & cube_save, LR_iteration,&
@@ -40,16 +40,15 @@ SUBROUTINE lr_calc_dens( evc1, response_calc )
                                      & lr_exx
   USE lsda_mod,               ONLY : current_spin, isk
   USE wavefunctions_module,   ONLY : psic
-  USE wvfct,                  ONLY : nbnd, et, wg, npwx, npw
+  USE wvfct,                  ONLY : nbnd, et, wg, npwx
   USE control_flags,          ONLY : gamma_only
-  USE uspp,                   ONLY : vkb, nkb, okvan, qq, becsum
+  USE uspp,                   ONLY : vkb, nkb, okvan, qq_nt, becsum
   USE uspp_param,             ONLY : upf, nh
   USE io_global,              ONLY : ionode, stdout
   USE io_files,               ONLY : tmp_dir, prefix
   USE mp,                     ONLY : mp_sum
   USE mp_global,              ONLY : inter_pool_comm, intra_bgrp_comm,&
                                      inter_bgrp_comm 
-  USE realus,                 ONLY : igk_k,npw_k, addusdens_r
   USE charg_resp,             ONLY : w_T, lr_dump_rho_tot_cube,&
                                      & lr_dump_rho_tot_xyzd, &
                                      & lr_dump_rho_tot_xcrys,&
@@ -61,6 +60,7 @@ SUBROUTINE lr_calc_dens( evc1, response_calc )
   USE lr_exx_kernel,          ONLY : lr_exx_kernel_int, revc_int,&
                                      & revc_int_c
   USE constants,              ONLY : eps12
+  USE fft_helper_subroutines
   !
   IMPLICIT NONE
   !
@@ -106,7 +106,7 @@ SUBROUTINE lr_calc_dens( evc1, response_calc )
      !
      IF ( doublegrid ) CALL interpolate(rho_1,rho_1,1)
      !
-#ifdef __MPI
+#if defined(__MPI)
      CALL mp_sum(rho_1, inter_bgrp_comm)
 #endif
      !
@@ -125,19 +125,13 @@ SUBROUTINE lr_calc_dens( evc1, response_calc )
   ! Here we add the Ultrasoft contribution to the charge density
   ! response. 
   !
-  IF (okvan) THEN
-     IF (tqr) THEN
-        CALL addusdens_r(rho_1,.FALSE.)
-     ELSE
-        CALL addusdens(rho_1)
-     ENDIF
-  ENDIF
+  IF (okvan) CALL addusdens(rho_1)
   !
   ! The psic workspace can present a memory bottleneck
   !
   DEALLOCATE ( psic )
   !
-#ifdef __MPI
+#if defined(__MPI)
   IF(gamma_only) THEN
      CALL mp_sum(rho_1, inter_pool_comm)
   ELSE
@@ -154,7 +148,7 @@ SUBROUTINE lr_calc_dens( evc1, response_calc )
         rho_sum = 0.0d0
         rho_sum = SUM(rho_1(:,ispin))
         !
-#ifdef __MPI
+#if defined(__MPI)
         CALL mp_sum(rho_sum, intra_bgrp_comm )
 #endif
         !
@@ -208,7 +202,7 @@ SUBROUTINE lr_calc_dens( evc1, response_calc )
         !
      ENDDO
      !
-#ifdef __MPI
+#if defined(__MPI)
      CALL mp_sum(rho_sum_resp_x, intra_bgrp_comm)
      CALL mp_sum(rho_sum_resp_y, intra_bgrp_comm)
      CALL mp_sum(rho_sum_resp_z, intra_bgrp_comm)
@@ -253,7 +247,7 @@ SUBROUTINE lr_calc_dens( evc1, response_calc )
         !
         CLOSE(158)
         !
-#ifdef __MPI
+#if defined(__MPI)
      ENDIF
 #endif
      !
@@ -323,7 +317,6 @@ CONTAINS
     USE io_global,           ONLY : stdout
     USE realus,              ONLY : real_space, invfft_orbital_gamma,&
                                     & initialisation_level,&
-                                    & fwfft_orbital_gamma,&
                                     & calbec_rs_gamma,&
                                     & add_vuspsir_gamma, v_loc_psir,&
                                     & real_space_debug 
@@ -332,28 +325,24 @@ CONTAINS
     USE mp,                  ONLY : mp_sum
     USE realus,              ONLY : tg_psic
     USE fft_base,            ONLY : dffts
-    USE fft_parallel,        ONLY : tg_gather
-    USE wvfct,               ONLY : igk
 
     IMPLICIT NONE
     !
     INTEGER :: ibnd_start_gamma, ibnd_end_gamma
-    LOGICAL :: use_tg
-    INTEGER :: v_siz, incr, ioff, idx
+    INTEGER :: v_siz, incr, ir3, ioff, ioff_tg, nxyp, idx
     REAL(DP), ALLOCATABLE :: tg_rho(:)
     !
     ibnd_start_gamma = ibnd_start
     IF (MOD(ibnd_start, 2)==0) ibnd_start_gamma = ibnd_start + 1
     ibnd_end_gamma = MAX(ibnd_end, ibnd_start_gamma)
     !
-    use_tg = dffts%have_task_groups
     incr = 2
     !
     IF ( dffts%have_task_groups ) THEN
        !
-       v_siz =  dffts%tg_nnr * dffts%nogrp
+       v_siz =  dffts%nnr_tg
        !
-       incr = 2 * dffts%nogrp
+       incr = 2 * fftx_ntgrp(dffts)
        !
        ALLOCATE( tg_rho( v_siz ) )
        tg_rho= 0.0_DP
@@ -369,15 +358,13 @@ CONTAINS
        IF (dffts%have_task_groups) THEN
           !
           ! Now the first proc of the group holds the first two bands
-          ! of the 2*dffts%nogrp bands that we are processing at the same time,
+          ! of the 2*ntgrp bands that we are processing at the same time,
           ! the second proc. holds the third and fourth band
           ! and so on.
           !
           ! Compute the proper factor for each band
           !
-          DO idx = 1, dffts%nogrp
-             IF( dffts%nolist( idx ) == me_bgrp ) EXIT
-          ENDDO
+          idx = fftx_tgpe(dffts) + 1
           !
           ! Remember two bands are packed in a single array :
           ! proc 0 has bands ibnd   and ibnd+1
@@ -399,10 +386,10 @@ CONTAINS
              w2 = w1
           END IF
           !
-          DO ir = 1, dffts%tg_npp( me_bgrp + 1 ) * dffts%nr1x * dffts%nr2x
+          DO ir = 1, dffts%nr1x * dffts%nr2x * dffts%my_nr3p
              tg_rho(ir) = tg_rho(ir) &
                   + 2.0d0*(w1*real(tg_revc0(ir,ibnd,1),dp)*real(tg_psic(ir),dp)&
-                  + w2*aimag(tg_revc0(ir,ibnd,1))*aimag(tg_psic(ir)))
+                  +       w2*aimag(tg_revc0(ir,ibnd,1))*aimag(tg_psic(ir)))
           ENDDO
           !
        ELSE
@@ -430,7 +417,7 @@ CONTAINS
           DO ir = 1, dffts%nnr
              rho_1(ir,1) = rho_1(ir,1) &
                   + 2.0d0*(w1*real(revc0(ir,ibnd,1),dp)*real(psic(ir),dp)&
-                  + w2*aimag(revc0(ir,ibnd,1))*aimag(psic(ir)))
+                  +       w2*aimag(revc0(ir,ibnd,1))*aimag(psic(ir)))
           ENDDO
           !
           ! OBM - psic now contains the response functions in real space.
@@ -457,19 +444,7 @@ CONTAINS
        !
        ! reduce the group charge
        !
-       CALL mp_sum( tg_rho, gid = dffts%ogrp_comm )
-       !
-       ioff = 0
-       DO idx = 1, dffts%nogrp
-          IF ( me_bgrp == dffts%nolist( idx ) ) EXIT
-          ioff = ioff + dffts%nr1x * dffts%nr2x * dffts%npp( dffts%nolist( idx ) + 1 )
-       END DO
-       !
-       ! copy the charge back to the processor location
-       !
-       DO ir = 1, dffts%nnr
-          rho_1(ir,1) = rho_1(ir,1) + tg_rho(ir+ioff)
-       ENDDO
+       CALL tg_reduce_rho( rho_1, tg_rho, 1, dffts )
        !
     ENDIF
     !
@@ -487,7 +462,7 @@ CONTAINS
        !
        IF ( real_space_debug <= 6) THEN 
           ! In real space, the value is calculated above
-          CALL calbec(npw_k(1), vkb, evc1(:,:,1), becp)
+          CALL calbec(ngk(1), vkb, evc1(:,:,1), becp)
           !
        ENDIF
        !
@@ -518,7 +493,7 @@ CONTAINS
                               2.d0 * w1 * becp%r(ikb,ibnd) *&
                               & becp_1(ikb,ibnd)
                          !
-                         scal = scal + qq(ih,ih,np) *1.d0 *&
+                         scal = scal + qq_nt(ih,ih,np) *1.d0 *&
                               &  becp%r(ikb,ibnd) * becp_1(ikb,ibnd)
                          !
                          ijh = ijh + 1
@@ -533,7 +508,7 @@ CONTAINS
                                  &becp%r(jkb,ibnd) + & 
                                  becp_1(jkb,ibnd) * becp%r(ikb,ibnd))
                             !
-                            scal = scal + qq(ih,jh,np) * 1.d0 *&
+                            scal = scal + qq_nt(ih,jh,np) * 1.d0 *&
                                  & (becp%r(ikb,ibnd) * &
                                  &becp_1(jkb, ibnd) + &
                                  &becp%r(jkb,ibnd) * becp_1(ikb,ibnd))
@@ -594,7 +569,7 @@ CONTAINS
           !
           psic(:) = (0.0d0,0.0d0)
           !
-          DO ig=1,npw_k(ik)
+          DO ig = 1, ngk(ik)
              psic(nls(igk_k(ig,ik)))=evc1(ig,ibnd,ik)
           ENDDO
           !
@@ -625,7 +600,7 @@ CONTAINS
           !
           ! Calculate the beta-functions vkb
           !
-          CALL init_us_2(npw_k(ik),igk_k(1,ik),xk(1,ik),vkb)
+          CALL init_us_2(ngk(ik),igk_k(1,ik),xk(1,ik),vkb)
           !
           scal = 0.0d0
           becsum(:,:,:) = 0.0d0
@@ -633,7 +608,7 @@ CONTAINS
           ! Calculate the product of beta-functions vkb with the 
           ! wavefunctions evc1 : becp%k = <vkb|evc1>
           !
-          CALL calbec(npw_k(ik),vkb,evc1(:,:,ik),becp)
+          CALL calbec(ngk(ik),vkb,evc1(:,:,ik),becp)
           !
           CALL start_clock( 'becsum' )
           !
@@ -663,7 +638,7 @@ CONTAINS
                                  &DBLE(CONJG(becp%k(ikb,ibnd)) *&
                                  & becp1_c(ikb,ibnd,ik)) 
                             !
-                            scal = scal + qq(ih,ih,np) * 1.d0 *&
+                            scal = scal + qq_nt(ih,ih,np) * 1.d0 *&
                                  &  DBLE(CONJG(becp%k(ikb,ibnd)) *&
                                  & becp1_c(ikb,ibnd,ik))
                             !
@@ -681,7 +656,7 @@ CONTAINS
                                     becp1_c(jkb,ibnd,ik) *&
                                     & CONJG(becp%k(ikb,ibnd)))
                                !
-                               scal = scal + qq(ih,jh,np) * 1.d0 * &
+                               scal = scal + qq_nt(ih,jh,np) * 1.d0 * &
                                     & DBLE(CONJG(becp%k(ikb,ibnd)) *&
                                     & becp1_c(jkb,ibnd,ik)+&
                                     & becp%k(jkb,ibnd) * &

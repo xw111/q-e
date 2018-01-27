@@ -41,9 +41,10 @@ PROGRAM pmw
   NAMELIST / inputpp / outdir, prefix, first_band, last_band, writepp, &
                       min_energy, max_energy, sigma
   !
+
   ! initialise environment
   !
-#ifdef __MPI
+#if defined(__MPI)
   CALL mp_startup ( )
 #endif
   CALL environment_start ( 'PMW' )
@@ -129,15 +130,13 @@ SUBROUTINE projection (first_band, last_band, min_energy, max_energy, sigma, iop
   USE uspp_param, ONLY : upf
   USE ions_base,  ONLY : nat, ityp
   USE basis,      ONLY : natomwfc, swfcatom
-  USE cell_base
   USE constants,  ONLY: rytoev
   USE gvect
-  USE klist
-  USE wvfct
+  USE klist,      ONLY:  nks, nkstot, ngk, igk_k, xk 
+  USE wvfct,      ONLY : nbnd, npwx, et
   USE ldaU,       ONLY : is_Hubbard, Hubbard_lmax, Hubbard_l, &
                          oatwfc, offsetU, nwfcU, wfcU, copy_U_wfc
-  USE lsda_mod
-  USE symm_base
+  USE symm_base,  ONLY : nrot, nsym, nsym_ns, nsym_na, ftau, irt, s, sname, d1, d2, d3, ft, sr  
   USE mp_pools,   ONLY : me_pool, root_pool, my_pool_id, kunit, npool
   USE control_flags, ONLY: gamma_only
   USE uspp,       ONLY: nkb, vkb
@@ -159,7 +158,7 @@ SUBROUTINE projection (first_band, last_band, min_energy, max_energy, sigma, iop
   !
   ! local variables
   !
-  INTEGER :: ibnd, ik, na, nt, n, m, l, nwfc, lmax_wfc, &
+  INTEGER :: npw, ibnd, ik, na, nt, n, m, l, nwfc, lmax_wfc, &
              ldim1, ldim2, lwork, i, j, info, counter, counter_ldau
   LOGICAL :: exst
   COMPLEX(DP), ALLOCATABLE :: wfcatom (:,:)
@@ -173,7 +172,7 @@ SUBROUTINE projection (first_band, last_band, min_energy, max_energy, sigma, iop
   ! left unitary matrix in the SVD of sp_m
   ! right unitary matrix in the SVD of sp_m
   ! workspace for ZGESVD
-  REAL(DP), ALLOCATABLE :: ew(:), rwork(:)
+  REAL(DP), ALLOCATABLE :: ew(:), rwork(:), gk(:)
   ! the eigenvalues of pp
   ! workspace for ZGESVD
   REAL (DP) :: capel
@@ -184,6 +183,7 @@ SUBROUTINE projection (first_band, last_band, min_energy, max_energy, sigma, iop
   INTEGER, ALLOCATABLE :: kstatus(:)
   !!
   !
+  
   WRITE( stdout, '(/5x,"Calling projection to compute Wannier projectors ... ")')
   !
   IF ( gamma_only ) WRITE( stdout, '(5x,"gamma-point specific algorithms are used")')
@@ -254,15 +254,13 @@ SUBROUTINE projection (first_band, last_band, min_energy, max_energy, sigma, iop
   ALLOCATE(swfcatom (npwx , ldim1 ) )
   ! Allocate the array containing <beta|wfcatom>
   CALL allocate_bec_type ( nkb, ldim1, becp)
-
   !
   ! Main loop (on k-points)
   !
+  ALLOCATE (gk(npwx))
   DO ik = 1, nks
      !
-     !!DEBUG
-     !WRITE (*,*) "KPOINT =", ik
-     CALL gk_sort (xk (1, ik), ngm, g, ecutwfc / tpiba2, npw, igk, g2kin)
+     npw = ngk(ik)
 
      CALL davcio (evc, 2*nwordwfc, iunwfc, ik, - 1)
 
@@ -273,7 +271,7 @@ SUBROUTINE projection (first_band, last_band, min_energy, max_energy, sigma, iop
      CALL copy_U_wfc (wfcatom)
      !CALL copy_U_wfc (swfcatom, noncolin) ! not yet implemented/tested
 
-     CALL init_us_2 (npw, igk, xk (1, ik), vkb)
+     CALL init_us_2 (npw, igk_k(1,ik), xk (1, ik), vkb)
 
      CALL calbec ( npw, vkb, wfcU, becp )
 
@@ -369,7 +367,6 @@ SUBROUTINE projection (first_band, last_band, min_energy, max_energy, sigma, iop
         iun_pp = find_free_unit()
         OPEN (unit=iun_pp, file=trim(prefix)//'.pp'//trim(adjustl(kptstr)), &
            form='formatted')
-
         DO i = 1,ldim1
            WRITE(iun_pp,'(2f22.15)') ( pp(i,j), j=1,ldim2 )
            WRITE(iun_pp,'(/)')
@@ -380,6 +377,7 @@ SUBROUTINE projection (first_band, last_band, min_energy, max_energy, sigma, iop
      !
      ! on k-points
   ENDDO
+  DEALLOCATE (gk)
   !
   ! Check if everything went OK (on all k-points)
   !

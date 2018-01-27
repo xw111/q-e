@@ -14,11 +14,12 @@ subroutine stres_knl (sigmanlc, sigmakin)
   USE constants,            ONLY: pi, e2
   USE cell_base,            ONLY: omega, alat, at, bg, tpiba
   USE gvect,                ONLY: g
-  USE klist,                ONLY: nks, xk, ngk
-  USE io_files,             ONLY: iunwfc, nwordwfc, iunigk
+  USE gvecw,                ONLY: qcutz, ecfixed, q2sigma
+  USE klist,                ONLY: nks, xk, ngk, igk_k
+  USE io_files,             ONLY: iunwfc, nwordwfc
   USE buffers,              ONLY: get_buffer
   USE symme,                ONLY: symmatrix
-  USE wvfct,                ONLY: npw, npwx, nbnd, igk, wg, qcutz, ecfixed, q2sigma
+  USE wvfct,                ONLY: npwx, nbnd, wg
   USE control_flags,        ONLY: gamma_only
   USE noncollin_module,     ONLY: noncolin, npol
   USE wavefunctions_module, ONLY: evc
@@ -29,7 +30,7 @@ subroutine stres_knl (sigmanlc, sigmakin)
   real(DP) :: sigmanlc (3, 3), sigmakin (3, 3)
   real(DP), allocatable :: gk (:,:), kfac (:)
   real(DP) :: twobysqrtpi, gk2, arg
-  integer :: ik, l, m, i, ibnd, is
+  integer :: npw, ik, l, m, i, ibnd, is
 
   allocate (gk(  3, npwx))    
   allocate (kfac(   npwx))    
@@ -40,17 +41,14 @@ subroutine stres_knl (sigmanlc, sigmakin)
 
   kfac(:) = 1.d0
 
-  if (nks.gt.1) rewind (iunigk)
   do ik = 1, nks
-     npw = ngk(ik)
-     if (nks > 1) then
-        read (iunigk) igk
+     if (nks > 1) &
         call get_buffer (evc, nwordwfc, iunwfc, ik)
-     endif
+     npw = ngk(ik)
      do i = 1, npw
-        gk (1, i) = (xk (1, ik) + g (1, igk (i) ) ) * tpiba
-        gk (2, i) = (xk (2, ik) + g (2, igk (i) ) ) * tpiba
-        gk (3, i) = (xk (3, ik) + g (3, igk (i) ) ) * tpiba
+        gk (1, i) = (xk (1, ik) + g (1, igk_k(i,ik) ) ) * tpiba
+        gk (2, i) = (xk (2, ik) + g (2, igk_k(i,ik) ) ) * tpiba
+        gk (3, i) = (xk (3, ik) + g (3, igk_k(i,ik) ) ) * tpiba
         if (qcutz.gt.0.d0) then
            gk2 = gk (1, i) **2 + gk (2, i) **2 + gk (3, i) **2
            arg = ( (gk2 - ecfixed) / q2sigma) **2
@@ -83,17 +81,26 @@ subroutine stres_knl (sigmanlc, sigmakin)
      !  contribution from the  nonlocal part
      !
      call stres_us (ik, gk, sigmanlc)
-
+     !
   enddo
   !
-  ! add the US term from augmentation charge derivatives
+  deallocate(kfac)
+  deallocate(gk)
   !
-  call addusstres (sigmanlc)
+  ! the kinetic term must be summed over PW's and over k-points
   !
   call mp_sum( sigmakin, intra_bgrp_comm )
-  call mp_sum( sigmanlc, intra_bgrp_comm )
   call mp_sum( sigmakin, inter_pool_comm )
+  !
+  ! the nonlocal term is summed here only over k-points, because we add
+  ! to it the US term from augmentation charge derivatives
+  !
   call mp_sum( sigmanlc, inter_pool_comm )
+  !
+  ! add US term from augmentation charge derivatives, sum result over PW's
+  !
+  call addusstress (sigmanlc)
+  call mp_sum( sigmanlc, intra_bgrp_comm )
   !
   do l = 1, 3
      do m = 1, l - 1
@@ -113,9 +120,7 @@ subroutine stres_knl (sigmanlc, sigmakin)
   !
   call symmatrix ( sigmakin )
   call symmatrix ( sigmanlc )
-
-  deallocate(kfac)
-  deallocate(gk)
+  !
   return
 end subroutine stres_knl
 

@@ -18,15 +18,20 @@
       USE kinds,            ONLY: DP
       USE ions_base,        ONLY: nsp, na, cdmi, taui
       USE cell_base,        ONLY: s_to_r
+#if defined (__OLDXML)
       USE cp_restart,       ONLY: cp_writefile
-      USE cp_interfaces,    ONLY: set_evtot, set_eitot, c_bgrp_expand, c_bgrp_pack
+#else
+      USE cp_restart_new,   ONLY: cp_writefile
+#endif
+      USE cp_restart_new,   ONLY: cp_write_zmat
+      USE cp_interfaces,    ONLY: set_evtot, set_eitot, c_bgrp_expand, &
+           c_bgrp_pack
       USE electrons_base,   ONLY: nspin, nbnd, nbsp, iupdwn, nupdwn, nbspx
       USE electrons_module, ONLY: ei
       USE io_files,         ONLY: tmp_dir
       USE ensemble_dft,     ONLY: tens
       USE mp,               ONLY: mp_bcast
       USE control_flags,    ONLY: tksw, ndw, io_level, twfcollect
-      USE xml_io_base,      ONLY: restart_dir
       USE electrons_module, ONLY: collect_c
       USE descriptors,      ONLY: la_descriptor
       USE gvecw,            ONLY: ngw
@@ -51,7 +56,7 @@
       TYPE(la_descriptor), INTENT(IN) :: descla(:)
 
       REAL(DP) :: ht(3,3), htm(3,3), htvel(3,3), gvel(3,3)
-      INTEGER  :: nk = 1, ispin, i, ib
+      INTEGER  :: nk = 1, ispin, i, ib, ierr
       REAL(DP) :: xk(3,1) = 0.0d0, wk(1) = 2.0d0
       COMPLEX(DP), ALLOCATABLE :: ctot(:,:)
       REAL(DP),    ALLOCATABLE :: eitot(:,:)
@@ -90,24 +95,15 @@
          !
       END IF
       !
-      IF( tens ) THEN
-        !
-        CALL cp_writefile( ndw, .TRUE., nfi, tps, acc, nk, xk, wk,   &
-          ht, htm, htvel, gvel, xnhh0, xnhhm, vnhh, taui, cdmi , taus,        &
-          vels, tausm, velsm, fion, vnhp, xnhp0, xnhpm, nhpcl,nhpdim, occ_f , &
-          occ_f , lambda, lambdam, xnhe0, xnhem, vnhe, ekincm, ei,            &
-          rho, c0, cm, ctot, iupdwn, nupdwn, iupdwn, nupdwn, wfc, mat_z = mat_z  ) ! BS added wfc
-        !
-      ELSE
-        ! 
-        CALL cp_writefile( ndw, .TRUE., nfi, tps, acc, nk, xk, wk,  &
-             ht, htm, htvel, gvel, xnhh0, xnhhm, vnhh, taui, cdmi , taus,    &
-             vels, tausm, velsm, fion, vnhp, xnhp0, xnhpm, nhpcl,nhpdim, occ_f,&
-             occ_f , lambda, lambdam, xnhe0, xnhem, vnhe, ekincm, eitot,     &
-             rho, c0, cm, ctot, iupdwn, nupdwn, iupdwn_tot, nupdwn_tot, wfc ) ! BS added wfc
-        !
-      END IF
-
+      CALL cp_writefile( ndw, .TRUE., nfi, tps, acc, nk, xk, wk,   &
+           ht, htm, htvel, gvel, xnhh0, xnhhm, vnhh, taui, cdmi , taus,        &
+           vels, tausm, velsm, fion, vnhp, xnhp0, xnhpm, nhpcl,nhpdim, occ_f , &
+           occ_f , lambda, lambdam, xnhe0, xnhem, vnhe, ekincm, eitot,         &
+           rho, c0, cm, ctot, iupdwn, nupdwn, iupdwn_tot, nupdwn_tot, wfc )
+      ! BS added wfc
+      !
+      IF( tens ) CALL cp_write_zmat( ndw, mat_z, ierr )
+      !
       DEALLOCATE( eitot )
       !
       IF( tksw ) DEALLOCATE( ctot )
@@ -133,7 +129,12 @@
       USE electrons_base, ONLY : nbnd, nbsp, nspin, nupdwn, iupdwn, keep_occ, nbspx
       USE gvecw,          ONLY : ngw
       USE ions_base,      ONLY : nsp, na, cdmi, taui
-      USE cp_restart,     ONLY : cp_readfile, cp_read_cell, cp_read_wfc
+#if defined (__OLDXML)
+      USE cp_restart,       ONLY: cp_readfile, cp_read_cell, cp_read_wfc
+#else
+      USE cp_restart_new,   ONLY: cp_readfile, cp_read_cell, cp_read_wfc
+#endif
+      USE cp_restart_new, ONLY : cp_read_zmat
       USE ensemble_dft,   ONLY : tens
       USE autopilot,      ONLY : event_step, event_index, max_event_step
       USE cp_autopilot,   ONLY : employ_rules
@@ -158,7 +159,7 @@
       REAL(DP), INTENT(INOUT) :: mat_z(:,:,:), occ_f(:)
       !
       REAL(DP) :: ht(3,3), htm(3,3), htvel(3,3), gvel(3,3)
-      integer :: nk = 1, ispin, i, ib
+      integer :: nk = 1, ispin, i, ib, ierr
       REAL(DP) :: xk(3,1) = 0.0d0, wk(1) = 2.0d0
       REAL(DP), ALLOCATABLE :: occ_ ( : )
       REAL(DP) :: b1(3) , b2(3), b3(3)
@@ -182,19 +183,13 @@
 
       ALLOCATE( occ_ ( SIZE( occ_f ) ) )
 
-      IF( tens ) THEN
-         CALL cp_readfile( ndr, .TRUE., nfi, tps, acc, nk, xk, wk, &
-                ht, htm, htvel, gvel, xnhh0, xnhhm, vnhh, taui, cdmi, taus, &
-                vels, tausm, velsm, fion, vnhp, xnhp0, xnhpm, nhpcl,nhpdim,occ_ , &
-                occ_ , lambda, lambdam, b1, b2, b3, &
-                xnhe0, xnhem, vnhe, ekincm, c0, cm, wfc, mat_z = mat_z ) ! BS added wfc
-      ELSE
-         CALL cp_readfile( ndr, .TRUE., nfi, tps, acc, nk, xk, wk, &
-                ht, htm, htvel, gvel, xnhh0, xnhhm, vnhh, taui, cdmi, taus, &
-                vels, tausm, velsm, fion, vnhp, xnhp0, xnhpm, nhpcl,nhpdim,occ_ , &
-                occ_ , lambda, lambdam, b1, b2, b3, &
-                xnhe0, xnhem, vnhe, ekincm, c0, cm, wfc ) ! BS added wfc
-      END IF
+      CALL cp_readfile( ndr, .TRUE., nfi, tps, acc, nk, xk, wk, &
+           ht, htm, htvel, gvel, xnhh0, xnhhm, vnhh, taui, cdmi, taus, &
+           vels, tausm, velsm, fion, vnhp, xnhp0, xnhpm, nhpcl,nhpdim,occ_ , &
+           occ_ , lambda, lambdam, b1, b2, b3, &
+           xnhe0, xnhem, vnhe, ekincm, c0, cm, wfc ) ! BS added wfc
+      !
+      IF( tens ) CALL cp_read_zmat( ndr, mat_z, ierr )
       !
       ! AutoPilot (Dynamic Rules) Implementation
       event_index = 1
@@ -285,4 +280,4 @@
       !
       RETURN
 
-   END SUBROUTINE set_evtot_x
+    END SUBROUTINE set_evtot_x

@@ -9,10 +9,10 @@
 
 MODULE orthogonalize_base
 
-
       USE kinds
-      USE dspev_module, ONLY: pdspev_drv, dspev_drv
-
+      USE dspev_module, ONLY: diagonalize_serial, diagonalize_parallel
+      USE mytime, ONLY : f_wall
+      
       IMPLICIT NONE
 
       SAVE
@@ -34,113 +34,16 @@ MODULE orthogonalize_base
       PUBLIC :: ortho_iterate
       PUBLIC :: ortho_alt_iterate
       PUBLIC :: updatc, calphi_bgrp
-      PUBLIC :: mesure_diag_perf
-      PUBLIC :: mesure_mmul_perf
-      PUBLIC :: diagonalize_parallel
-      PUBLIC :: diagonalize_serial
+      PUBLIC :: mesure_diag_perf, mesure_mmul_perf
       PUBLIC :: use_parallel_diag
       PUBLIC :: bec_bgrp2ortho
 
 CONTAINS
 
-
-!  ----------------------------------------------
-
-
-   SUBROUTINE diagonalize_serial( n, rhos, rhod )
-      IMPLICIT NONE
-      INTEGER,  INTENT(IN)  :: n
-      REAL(DP)              :: rhos(:,:) 
-      REAL(DP)              :: rhod(:)   
-      !
-      ! inputs:
-      ! n     size of the eigenproblem
-      ! rhos  the symmetric matrix
-      ! outputs:  
-      ! rhos  eigenvectors
-      ! rhod  eigenvalues
-      !
-      REAL(DP), ALLOCATABLE :: aux(:)
-      INTEGER :: i, j, k
-
-      IF( n < 1 ) RETURN
-
-      ALLOCATE( aux( n * ( n + 1 ) / 2 ) )
-
-      !  pack lower triangle of rho into aux
-      !
-      k = 0
-      DO j = 1, n
-         DO i = j, n
-            k = k + 1
-            aux( k ) = rhos( i, j )
-         END DO
-      END DO
-
-      CALL dspev_drv( 'V', 'L', n, aux, rhod, rhos, SIZE(rhos,1) )
-
-      DEALLOCATE( aux )
-
-      RETURN
-
-   END SUBROUTINE diagonalize_serial
-
-
-!  ----------------------------------------------
-
-
-SUBROUTINE diagonalize_parallel( n, rhos, rhod, s, desc )
-
-      USE descriptors
-#ifdef __SCALAPACK
-      USE mp_global,    ONLY: ortho_cntx
-      USE dspev_module, ONLY: pdsyevd_drv
-#endif
-
-      IMPLICIT NONE
-      REAL(DP), INTENT(IN)  :: rhos(:,:) !  input symmetric matrix
-      REAL(DP)              :: rhod(:)   !  output eigenvalues
-      REAL(DP)              :: s(:,:)    !  output eigenvectors
-      INTEGER,   INTENT(IN) :: n         !  size of the global matrix
-      TYPE(la_descriptor), INTENT(IN) :: desc
-
-      IF( n < 1 ) RETURN
-
-      !  Matrix is distributed on the same processors group
-      !  used for parallel matrix multiplication
-      !
-      IF( SIZE(s,1) /= SIZE(rhos,1) .OR. SIZE(s,2) /= SIZE(rhos,2) ) &
-         CALL errore( " diagonalize_parallel ", " inconsistent dimension for s and rhos ", 1 )
-
-      IF ( desc%active_node > 0 ) THEN
-         !
-         IF( SIZE(s,1) /= desc%nrcx ) &
-            CALL errore( " diagonalize_parallel ", " inconsistent dimension ", 1 )
-         !
-         !  Compute local dimension of the cyclically distributed matrix
-         !
-         s = rhos
-         !
-#ifdef __SCALAPACK
-         CALL pdsyevd_drv( .true. , n, desc%nrcx, s, SIZE(s,1), rhod, ortho_cntx )
-#else
-         CALL qe_pdsyevd( .true., n, desc, s, SIZE(s,1), rhod )
-#endif
-         !
-      END IF
-
-      RETURN
-
-END SUBROUTINE diagonalize_parallel
-
-
-!  ----------------------------------------------
-
-
    SUBROUTINE mesure_diag_perf( n )
       !
       USE mp_global,   ONLY: nproc_bgrp, me_bgrp, intra_bgrp_comm, root_bgrp
-      USE mp_global,   ONLY: nproc_ortho, np_ortho, me_ortho, ortho_comm, ortho_comm_id
+      USE mp_global,   ONLY: nproc_ortho, np_ortho, me_ortho, ortho_comm, ortho_cntx, ortho_comm_id
       USE io_global,   ONLY: ionode, stdout
       USE mp,          ONLY: mp_sum, mp_bcast, mp_barrier
       USE mp,          ONLY: mp_max
@@ -153,8 +56,6 @@ END SUBROUTINE diagonalize_parallel
       REAL(DP) :: t1, tpar, tser
       INTEGER  :: nr, nc, ir, ic, nx
       TYPE(la_descriptor) :: desc
-      REAL(DP) :: cclock
-      EXTERNAL :: cclock
       INTEGER, PARAMETER :: paradim = 1000
       !
       ! Check if number of PEs for orthogonalization/diagonalization is given from the input
@@ -166,7 +67,7 @@ END SUBROUTINE diagonalize_parallel
 
       ALLOCATE( d( n ) )
       !
-      CALL descla_init( desc, n, n, np_ortho, me_ortho, ortho_comm, ortho_comm_id )
+      CALL descla_init( desc, n, n, np_ortho, me_ortho, ortho_comm, ortho_cntx, ortho_comm_id )
 
       nx = 1
       IF( desc%active_node > 0 ) nx = desc%nrcx
@@ -189,11 +90,11 @@ END SUBROUTINE diagonalize_parallel
       CALL set_a()
       !
       CALL mp_barrier( intra_bgrp_comm )
-      t1 = cclock()
+      t1 = f_wall()
       !
       CALL diagonalize_parallel( n, a, d, s, desc )
       !
-      tpar = cclock() - t1
+      tpar = f_wall() - t1
       CALL mp_max( tpar, intra_bgrp_comm )
 
       DEALLOCATE( s, a )
@@ -210,11 +111,11 @@ END SUBROUTINE diagonalize_parallel
 
          CALL set_a()
 
-         t1 = cclock()
+         t1 = f_wall()
 
          CALL diagonalize_serial( n, a, d )
 
-         tser = cclock() - t1
+         tser = f_wall() - t1
 
          DEALLOCATE( a )
 
@@ -275,17 +176,18 @@ END SUBROUTINE diagonalize_parallel
       END SUBROUTINE set_a
 
    END SUBROUTINE mesure_diag_perf
-   
 
 !  ----------------------------------------------
 
 
    SUBROUTINE mesure_mmul_perf( n )
       !
+      USE mp_world,    ONLY: world_comm
       USE mp_bands,    ONLY: nproc_bgrp, me_bgrp, intra_bgrp_comm, &
-                             root_bgrp
+                             root_bgrp, my_bgrp_id, nbgrp
+      USE mp_images,   ONLY: nimage, my_image_id
       USE mp_diag,     ONLY: ortho_comm, nproc_ortho, np_ortho, &
-                             me_ortho, init_ortho_group, ortho_comm_id
+                             me_ortho, init_ortho_group, ortho_comm_id, ortho_cntx
       USE io_global,   ONLY: ionode, stdout
       USE mp,          ONLY: mp_sum, mp_bcast, mp_barrier
       USE mp,          ONLY: mp_max
@@ -300,9 +202,6 @@ END SUBROUTINE diagonalize_parallel
       INTEGER  :: nr, nc, ir, ic, np, lnode
       TYPE(la_descriptor) :: desc
       !
-      REAL(DP) :: cclock
-      EXTERNAL :: cclock
-      !
       np    = MAX( INT( SQRT( DBLE( nproc_ortho ) + 0.1d0 ) ), 1 ) 
       !
       !  Make ortho group compatible with the number of electronic states
@@ -311,9 +210,9 @@ END SUBROUTINE diagonalize_parallel
       !
       !  Now re-define the ortho group and test the performance
       !
-      CALL init_ortho_group( np * np, intra_bgrp_comm )
+      CALL init_ortho_group( np * np, world_comm, intra_bgrp_comm, nimage*nbgrp, my_bgrp_id + nbgrp * my_image_id )
 
-      CALL descla_init( desc, n, n, np_ortho, me_ortho, ortho_comm, ortho_comm_id )
+      CALL descla_init( desc, n, n, np_ortho, me_ortho, ortho_comm, ortho_cntx, ortho_comm_id )
 
       nr = desc%nr
       nc = desc%nc
@@ -328,11 +227,11 @@ END SUBROUTINE diagonalize_parallel
       CALL sqr_mm_cannon( 'N', 'N', n, 1.0d0, a, nr, b, nr, 0.0d0, c, nr, desc) 
 
       CALL mp_barrier( intra_bgrp_comm )
-      t1 = cclock()
+      t1 = f_wall()
 
       CALL sqr_mm_cannon( 'N', 'N', n, 1.0d0, a, nr, b, nr, 0.0d0, c, nr, desc)
    
-      tcan = cclock() - t1
+      tcan = f_wall() - t1
       CALL mp_max( tcan, intra_bgrp_comm )
 
       DEALLOCATE( a, c, b )
@@ -749,7 +648,7 @@ END SUBROUTINE diagonalize_parallel
             coor_ip(1) = ipr - 1
             coor_ip(2) = ipc - 1
 
-            CALL descla_init( desc_ip, desc%n, desc%nx, np, coor_ip, desc%comm, 1 )
+            CALL descla_init( desc_ip, desc%n, desc%nx, np, coor_ip, desc%comm, desc%cntx, 1 )
 
             nr = desc_ip%nr
             nc = desc_ip%nc
@@ -763,8 +662,12 @@ END SUBROUTINE diagonalize_parallel
 
                root = root * leg_ortho
 
-               CALL dgemm( 'T', 'N',  nr, nc, 2*ngw, -2.0d0, cp( 1, ist + ir - 1), 2*ngwx, &
+               IF( ngw > 0 ) THEN 
+                  CALL dgemm( 'T', 'N',  nr, nc, 2*ngw, -2.0d0, cp( 1, ist + ir - 1), 2*ngwx, &
                            cp( 1, ist + ic - 1 ), 2*ngwx, 0.0d0, sigp, nx )
+               ELSE
+                  sigp = 0.0d0
+               END IF
                !
                !     q = 0  components has weight 1.0
                !
@@ -889,7 +792,7 @@ END SUBROUTINE diagonalize_parallel
             coor_ip(1) = ipr - 1
             coor_ip(2) = ipc - 1
 
-            CALL descla_init( desc_ip, desc%n, desc%nx, np, coor_ip, desc%comm, 1 )
+            CALL descla_init( desc_ip, desc%n, desc%nx, np, coor_ip, desc%comm, desc%cntx, 1 )
 
             nr = desc_ip%nr
             nc = desc_ip%nc
@@ -901,18 +804,22 @@ END SUBROUTINE diagonalize_parallel
             !
             IF( MOD( root , nbgrp ) == my_bgrp_id ) THEN
 
-            root = root * leg_ortho
+               root = root * leg_ortho
 
-            CALL dgemm( 'T', 'N', nr, nc, 2*ngw, 2.0d0, phi( 1, ist + ir - 1 ), 2*ngwx, &
-                  cp( 1, ist + ic - 1 ), 2*ngwx, 0.0d0, rhop, nx )
-            !
-            !     q = 0  components has weight 1.0
-            !
-            IF (gstart == 2) THEN
-               CALL DGER( nr, nc, -1.D0, phi(1,ist+ir-1), 2*ngwx, cp(1,ist+ic-1), 2*ngwx, rhop, nx )
-            END IF
+               IF( ngw > 0 ) THEN
+                  CALL dgemm( 'T', 'N', nr, nc, 2*ngw, 2.0d0, phi( 1, ist + ir - 1 ), 2*ngwx, &
+                              cp( 1, ist + ic - 1 ), 2*ngwx, 0.0d0, rhop, nx )
+               ELSE
+                  rhop = 0.0d0
+               END IF
+               !
+               !     q = 0  components has weight 1.0
+               !
+               IF (gstart == 2) THEN
+                  CALL DGER( nr, nc, -1.D0, phi(1,ist+ir-1), 2*ngwx, cp(1,ist+ic-1), 2*ngwx, rhop, nx )
+               END IF
 
-            CALL mp_root_sum( rhop, rho, root, intra_bgrp_comm )
+               CALL mp_root_sum( rhop, rho, root, intra_bgrp_comm )
 
             END IF
 
@@ -1027,7 +934,7 @@ END SUBROUTINE diagonalize_parallel
             coor_ip(1) = ipr - 1
             coor_ip(2) = ipc - 1
 
-            CALL descla_init( desc_ip, desc%n, desc%nx, np, coor_ip, desc%comm, 1 )
+            CALL descla_init( desc_ip, desc%n, desc%nx, np, coor_ip, desc%comm, desc%cntx, 1 )
 
             nr = desc_ip%nr
             nc = desc_ip%nc
@@ -1044,8 +951,12 @@ END SUBROUTINE diagonalize_parallel
             !  All processors contribute to the tau block of processor (ipr,ipc)
             !  with their own part of wavefunctions
             !
-            CALL dgemm( 'T', 'N', nr, nc, 2*ngw, 2.0d0, phi( 1, ist + ir - 1 ), 2*ngwx, &
+            IF( ngw > 0 ) THEN
+               CALL dgemm( 'T', 'N', nr, nc, 2*ngw, 2.0d0, phi( 1, ist + ir - 1 ), 2*ngwx, &
                         phi( 1, ist + ic - 1 ), 2*ngwx, 0.0d0, taup, nx )
+            ELSE
+               taup = 0.0d0
+            END IF
             !
             !           q = 0  components has weight 1.0
             !
@@ -1142,6 +1053,8 @@ END SUBROUTINE diagonalize_parallel
       INTEGER :: np( 2 ), coor_ip( 2 )
       TYPE(la_descriptor) :: desc_ip
 
+      CALL start_clock( 'updatc' )
+
       DO iss = 1, nspin
          !
          !  size of the local block
@@ -1168,7 +1081,6 @@ END SUBROUTINE diagonalize_parallel
          np(1) = desc( iss )%npr
          np(2) = desc( iss )%npc
          !
-         CALL start_clock( 'updatc' )
    
          ALLOCATE( xd( nrcx, nrcx ) )
    
@@ -1213,7 +1125,7 @@ END SUBROUTINE diagonalize_parallel
                coor_ip(1) = ipr - 1
                coor_ip(2) = ipc - 1
    
-               CALL descla_init( desc_ip, desc( iss )%n, desc( iss )%nx, np, coor_ip, desc( iss )%comm, 1 )
+               CALL descla_init( desc_ip, desc( iss )%n, desc( iss )%nx, np, coor_ip, desc( iss )%comm, desc( iss )%cntx, 1 )
    
                nr = desc_ip%nr
                nc = desc_ip%nc
@@ -1248,8 +1160,10 @@ END SUBROUTINE diagonalize_parallel
    
                CALL mp_bcast( xd, root, intra_bgrp_comm )
    
-               CALL dgemm( 'N', 'N', 2*ngw, nbgrp_i, nr, 1.0d0, phi(1,istart+ir-1), 2*ngwx, &
+               IF( ngw > 0 ) THEN
+                  CALL dgemm( 'N', 'N', 2*ngw, nbgrp_i, nr, 1.0d0, phi(1,istart+ir-1), 2*ngwx, &
                            xd(1,i_first), nrcx, 1.0d0, cp_bgrp(1,ibgrp_i_first), 2*ngwx )
+               END IF
    
                IF( nvb > 0 )THEN
    
@@ -1325,7 +1239,7 @@ END SUBROUTINE diagonalize_parallel
       USE io_global,      ONLY: stdout
       USE mp_global,      ONLY: intra_bgrp_comm, inter_bgrp_comm
       USE uspp_param,     ONLY: nh, ish, nvb
-      USE uspp,           ONLY: nkbus, qq
+      USE uspp,           ONLY: nkbus, qq_nt
       USE gvecw,          ONLY: ngw
       USE electrons_base, ONLY: nbsp_bgrp, nbsp
       USE constants,      ONLY: pi, fpi
@@ -1361,8 +1275,8 @@ END SUBROUTINE diagonalize_parallel
                inl = ish(is)+(iv-1)*na(is)
                DO jv=1,nh(is)
                   jnl = ish(is)+(jv-1)*na(is)
-                  IF(ABS(qq(iv,jv,is)) > 1.d-5) THEN
-                     qqf = qq(iv,jv,is)
+                  IF(ABS(qq_nt(iv,jv,is)) > 1.d-5) THEN
+                     qqf = qq_nt(iv,jv,is)
                      DO i=1,nbsp_bgrp
                         CALL daxpy( na(is), qqf, bec_bgrp(jnl+1,i),1,qtemp(inl+1,i), 1 )
                      END DO
@@ -1371,8 +1285,12 @@ END SUBROUTINE diagonalize_parallel
             END DO
          END DO
 !
-         CALL dgemm ( 'N', 'N', 2*ngw, nbsp_bgrp, nkbus, 1.0d0, betae, &
+         IF( ngw > 0 ) THEN
+            CALL dgemm ( 'N', 'N', 2*ngw, nbsp_bgrp, nkbus, 1.0d0, betae, &
                        2*ngwx, qtemp, nkbus, 0.0d0, phi_bgrp, 2*ngwx )
+         ELSE
+            phi_bgrp = 0.0d0
+         END IF
 
          DEALLOCATE( qtemp )
 

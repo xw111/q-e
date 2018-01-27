@@ -1,5 +1,5 @@
 !
-! Copyright (C) 2001-2015 Quantum ESPRESSO group
+! Copyright (C) 2001-2016 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -21,7 +21,6 @@ SUBROUTINE lr_setup_nscf ()
   USE kinds,              ONLY : DP
   USE constants,          ONLY : eps8
   USE parameters,         ONLY : npk
-  USE io_global,          ONLY : stdout
   USE constants,          ONLY : pi, degspin
   USE cell_base,          ONLY : at, bg, alat, tpiba, tpiba2, ibrav, omega
   USE ions_base,          ONLY : nat, tau, ityp, zv
@@ -39,8 +38,8 @@ SUBROUTINE lr_setup_nscf ()
   USE noncollin_module,   ONLY : noncolin
   USE start_k,            ONLY : nks_start, xk_start, wk_start, &
                                  nk1, nk2, nk3, k1, k2, k3
-  USE modes,              ONLY : nsymq, minus_q
   USE uspp_param,         ONLY : n_atom_wfc
+  USE lr_symm_base,       ONLY : nsymq, minus_q
   USE qpoint,             ONLY : xq
   ! 
   IMPLICIT NONE
@@ -63,7 +62,7 @@ SUBROUTINE lr_setup_nscf ()
   max_cg_iter = 20
   natomwfc = n_atom_wfc( nat, ityp, noncolin )
   !
-#ifdef __MPI
+#if defined(__MPI)
   IF ( use_para_diag )  CALL check_para_diag( nbnd )
 #else
   use_para_diag = .FALSE.
@@ -148,8 +147,6 @@ SUBROUTINE lr_setup_nscf ()
   !
   qnorm = sqrt(xq(1)**2 + xq(2)**2 + xq(3)**2)
   !
-#ifdef __MPI
-  !
   ! ... set the granularity for k-point distribution
   !
   IF ( ABS( xq(1) ) < eps8 .AND. ABS( xq(2) ) < eps8 .AND. &
@@ -165,13 +162,7 @@ SUBROUTINE lr_setup_nscf ()
   !
   ! ... distribute k-points (and their weights and spin indices)
   !
-  CALL divide_et_impera( xk, wk, isk, lsda, nkstot, nks )
-  !
-#else
-  !
-  nks = nkstot
-  !
-#endif
+  CALL divide_et_impera( nkstot, xk, wk, isk, nks )
   !
   CALL stop_clock( 'lr_setup_nscf' )
   !

@@ -15,9 +15,9 @@ subroutine solve_head
   !
   USE ions_base,             ONLY : nat
   USE io_global,             ONLY : stdout, ionode,ionode_id
-  USE io_files,              ONLY : diropn,prefix, iunigk, tmp_dir
+  USE io_files,              ONLY : diropn,prefix, tmp_dir
   use pwcom
-  USE check_stop,            ONLY : max_seconds
+  USE cell_base,             ONLY : omega, tpiba2
   USE wavefunctions_module,  ONLY : evc
   USE kinds,                 ONLY : DP
   USE becmod,                ONLY : becp,calbec
@@ -28,7 +28,8 @@ subroutine solve_head
                                    l_scissor,scissor,len_head_block_freq, &
                                    len_head_block_wfc
   USE control_ph,           ONLY : tr2_ph
-  USE gvect,                ONLY : ig_l2g
+  USE gvect,                ONLY : ngm, ngm_g, nl, ig_l2g, gstart, g
+  USE gvecs,                ONLY : nls, doublegrid
   USE mp,                   ONLY : mp_sum, mp_barrier, mp_bcast
   USE mp_world,             ONLY : world_comm, mpime, nproc
   USE uspp,                 ONLY : nkb, vkb
@@ -39,7 +40,10 @@ subroutine solve_head
   USE fft_base,             ONLY : dfftp, dffts
   USE fft_interfaces,       ONLY : fwfft, invfft
   USE buffers,              ONLY : get_buffer
-  USE constants,            ONLY : rytoev
+  USE constants,            ONLY : rytoev, fpi
+
+  use qpoint,                ONLY : npwq, nksq
+  use control_lr,            ONLY : nbnd_occ, lgamma
 
   implicit none
 
@@ -66,12 +70,7 @@ subroutine solve_head
 
   real(DP) :: tcpu, get_clock
   ! timing variables
-
   
-  ! the name of the file with the mixing potential
-
-  external ch_psi_all, cg_psi
-
   REAL(kind=DP), ALLOCATABLE :: head(:,:),head_tmp(:)
   COMPLEX(kind=DP) :: sca, sca2
   REAL(kind=DP), ALLOCATABLE :: x(:),w(:), freqs(:)
@@ -257,7 +256,6 @@ subroutine solve_head
 
 
 !loop on k points
-     if (nksq.gt.1) rewind (unit = iunigk)
      do ik=1, nksq
         if(len_head_block_wfc==0) then
            nbnd_block=nbnd_occ(ik)
@@ -280,17 +278,13 @@ subroutine solve_head
         ww = fpi * weight / omega
       
         if (lsda) current_spin = isk (ik)
-        if (nksq.gt.1) then
-           read (iunigk, err = 100, iostat = ios) npw, igk
-100     call errore ('solve_head', 'reading igk', abs (ios) )
-        endif
+        npw = ngk(ik)
      !
      ! reads unperturbed wavefuctions psi_k in G_space, for all bands
      !
-    ! if (nksq.gt.1) call davcio (evc, lrwfc, iuwfc, ik, - 1)
         if (nksq.gt.1)  call get_buffer(evc, lrwfc, iuwfc, ik)
         npwq = npw
-        call init_us_2 (npw, igk, xk (1, ik), vkb)
+        call init_us_2 (npw, igk_k(1,ik), xk (1, ik), vkb)
 
 
 
@@ -298,9 +292,9 @@ subroutine solve_head
      ! compute the kinetic energy
      !
         do ig = 1, npwq
-           g2kin (ig) = ( (xk (1,ik ) + g (1,igk (ig)) ) **2 + &
-                (xk (2,ik ) + g (2,igk (ig)) ) **2 + &
-                (xk (3,ik ) + g (3,igk (ig)) ) **2 ) * tpiba2
+           g2kin (ig) = ( (xk (1,ik ) + g (1,igk_k (ig,ik)) ) **2 + &
+                (xk (2,ik ) + g (2,igk_k (ig,ik)) ) **2 + &
+                (xk (3,ik ) + g (3,igk_k (ig,ik)) ) **2 ) * tpiba2
         enddo
       !
         do ib=1,n_block
@@ -322,7 +316,7 @@ subroutine solve_head
            !trasform valence wavefunctions to real space                                                                                        
            do ibnd=1,lenb
               psi_v(:,ibnd) = ( 0.D0, 0.D0 )
-              psi_v(nls(igk(1:npw)),ibnd) = evc(1:npw,first_b+ibnd-1)
+              psi_v(nls(igk_k(1:npw,ik)),ibnd) = evc(1:npw,first_b+ibnd-1)
               CALL invfft ('Wave',  psi_v(:,ibnd), dffts)
            enddo
 
@@ -346,7 +340,7 @@ subroutine solve_head
                  CALL ZGEMM( 'C', 'N', nbnd_occ (ik), nbnd_occ (ik), npw, &
                       (1.d0,0.d0), evc(1,1), npwx, dvpsi(1,1), npwx, (0.d0,0.d0), &
                       ps(1,1), nbnd )
-#ifdef __MPI
+#if defined(__MPI)
            !call reduce (2 * nbnd * nbnd_occ (ik), ps)
                  call mp_sum(ps(1:nbnd_occ (ik),1:nbnd_occ (ik)),world_comm)
 #endif
@@ -407,7 +401,7 @@ subroutine solve_head
                          &(0.d0,0.d0),psi_tmp,npwx) 
 !fourier trasform
                     prod(:) = ( 0.D0, 0.D0 )
-                    prod(nls(igk(1:npw))) = psi_tmp(1:npw)
+                    prod(nls(igk_k(1:npw,ik))) = psi_tmp(1:npw)
                     CALL invfft ('Wave', prod, dffts)
            
 
@@ -472,7 +466,7 @@ subroutine solve_head
         head(first_f+i-1,3)=epsilon_g(3,3,i)
 
 
-#ifdef __MPI
+#if defined(__MPI)
         call mp_sum ( pola_charge(:,:,:,i) , inter_pool_comm )
         call psyme (pola_charge(:,:,:,i))
 #else

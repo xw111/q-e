@@ -211,7 +211,7 @@ contains
       wfck(:,1)=evc0(:,i,1)
       call invfft_orbital_gamma(wfck(:,:),1,1)  ! FFT: v  -> psic
       norm=DDOT(dffts%nnr,psic(:),2,banda,1)/tot_nnr
-#ifdef __MPI
+#if defined(__MPI)
       call mp_barrier( world_comm )
       call mp_sum(norm,intra_bgrp_comm)
 #endif
@@ -220,7 +220,7 @@ contains
       wfck(:,1)=evc0(:,i+1,1)
       call invfft_orbital_gamma(wfck(:,:),1,1)  ! FFT: v  -> psic
       norm=DDOT(dffts%nnr,psic(:),2,bandb,1)/tot_nnr
-#ifdef __MPI
+#if defined(__MPI)
       call mp_barrier( world_comm )
       call mp_sum(norm,intra_bgrp_comm)
 #endif
@@ -245,8 +245,7 @@ contains
     real(dp) :: diff,diffmax
 
     do ibr = 1, num_basis
-      call lr_apply_liouvillian(vec_b(:,:,:,ibr),vecwork(:,:,:),svecwork(:,:,:),.true.)
-      call lr_ortho(vecwork(:,:,:), evc0(:,:,1), 1, 1,sevc0(:,:,1),.true.)
+      call lr_apply_liouvillian(vec_b(:,:,:,ibr),vecwork(:,:,:),.true.)
       do ibl = 1, num_basis
         M_C(ibl,ibr)=lr_dot_us(vec_b(1,1,1,ibl),vecwork(1,1,1))
       enddo

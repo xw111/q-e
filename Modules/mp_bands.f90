@@ -23,18 +23,25 @@ MODULE mp_bands
   INTEGER :: me_bgrp     = 0  ! index of the processor within a band group
   INTEGER :: root_bgrp   = 0  ! index of the root processor within a band group
   INTEGER :: my_bgrp_id  = 0  ! index of my band group
+  INTEGER :: root_bgrp_id     = 0  ! index of root band group
   INTEGER :: inter_bgrp_comm  = 0  ! inter band group communicator
   INTEGER :: intra_bgrp_comm  = 0  ! intra band group communicator  
-  LOGICAL :: tbgrp       = .FALSE. ! logical flag. .TRUE. when nbgrp > 1
+  ! Next variable is .T. if band parallelization is performed inside H\psi 
+  ! and S\psi, .F. otherwise (band parallelization can be performed outside
+  ! H\psi and S\psi, though)  
+  LOGICAL :: use_bgrp_in_hpsi = .FALSE.
   !
   ! ... "task" groups (for band parallelization of FFT)
   !
   INTEGER :: ntask_groups = 1  ! number of proc. in an orbital "task group"
   !
+  ! ... "nyfft" groups (to push FFT parallelization beyond the nz-planes limit)
+  INTEGER :: nyfft = 1         ! number of y-fft groups. By default =1, i.e. y-ffts are done by a single proc 
+  !
 CONTAINS
   !
   !----------------------------------------------------------------------------
-  SUBROUTINE mp_start_bands( nband_, ntg_, parent_comm )
+  SUBROUTINE mp_start_bands( nband_, ntg_, nyfft_, parent_comm )
     !---------------------------------------------------------------------------
     !
     ! ... Divide processors (of the "parent_comm" group) into nband_ pools
@@ -45,7 +52,7 @@ CONTAINS
     IMPLICIT NONE
     !
     INTEGER, INTENT(IN) :: nband_, parent_comm
-    INTEGER, INTENT(IN), OPTIONAL :: ntg_
+    INTEGER, INTENT(IN), OPTIONAL :: ntg_, nyfft_
     !
     INTEGER :: parent_nproc = 1, parent_mype = 0
     !
@@ -64,9 +71,10 @@ CONTAINS
     IF ( MOD( parent_nproc, nbgrp ) /= 0 ) CALL errore( 'mp_start_bands', &
         'n. of band groups  must be divisor of parent_nproc', 1 )
     !
-    ! set the logical flag tbgrp 
+    ! set logical flag so that band parallelization in H\psi is allowed
+    ! (can be disabled before calling H\psi if not desired)
     !
-    tbgrp = ( nbgrp > 1 )
+    use_bgrp_in_hpsi = ( nbgrp > 1 )
     ! 
     ! ... Set number of processors per band group
     !
@@ -95,6 +103,10 @@ CONTAINS
     IF ( PRESENT(ntg_) ) THEN
        ntask_groups = ntg_
     END IF
+    IF ( PRESENT(nyfft_) ) THEN
+       nyfft = nyfft_
+    END IF
+    call errore('mp_bands',' nyfft value incompatible with nproc_bgrp ', MOD(nproc_bgrp, nyfft) )
     !
 #endif
     RETURN
@@ -163,7 +175,7 @@ END MODULE mp_bands
 !     
 MODULE mp_bands_TDDFPT
 !
-! NB: These two varialbles used to be in mp_bands and are loaded from mp_global in TDDFPT 
+! NB: These two variables used to be in mp_bands and are loaded from mp_global in TDDFPT 
 !     I think they would better stay in a TDDFPT specific module but leave them here not to
 !     be too invasive on a code I don't know well. SdG
 !     

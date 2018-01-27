@@ -14,7 +14,7 @@ MODULE paw_init
   PUBLIC :: PAW_atomic_becsum
   PUBLIC :: PAW_init_onecenter
   !PUBLIC :: PAW_increase_lm ! <-- unused
-#ifdef __MPI
+#if defined(__MPI)
   PUBLIC :: PAW_post_init
 #endif
 
@@ -73,7 +73,7 @@ MODULE paw_init
   END SUBROUTINE deallocate_paw_internals
 
 
-#ifdef __MPI
+#if defined(__MPI)
 ! Deallocate variables that are used only at init and then no more necessary.
 ! This is only useful in parallel, as each node only does a limited number of atoms
 SUBROUTINE PAW_post_init()
@@ -86,7 +86,7 @@ SUBROUTINE PAW_post_init()
     USE control_flags,      ONLY : iverbosity
     USE funct,              ONLY : dft_is_hybrid
     !
-    INTEGER :: nt, np, ia, ia_s, ia_e, mykey
+    INTEGER :: nt, np, ia, ia_s, ia_e, mykey, nnodes
     INTEGER :: info(0:nproc_image-1,ntyp)
 
     !
@@ -115,13 +115,14 @@ SUBROUTINE PAW_post_init()
         IF (ASSOCIATED(upf(nt)%paw%ptfunc)) DEALLOCATE( upf(nt)%paw%ptfunc )    
         IF (ASSOCIATED(upf(nt)%paw%pfunc_rel)) DEALLOCATE(upf(nt)%paw%pfunc_rel)    
         IF (ASSOCIATED(upf(nt)%paw%ae_vloc)) DEALLOCATE( upf(nt)%paw%ae_vloc )    
-                  
         info(me_image,nt) = 1
+                  
     ENDDO types
 
     CALL mp_sum(info, intra_image_comm)
 
-    IF(ionode .and. iverbosity>0) THEN
+    IF(ionode .and. iverbosity > 0 ) THEN
+#if defined (__DEBUG)
         DO np = 0,nproc_image-1
         DO nt = 1,ntyp
             IF( info(np,nt) > 0 ) &
@@ -129,6 +130,14 @@ SUBROUTINE PAW_post_init()
                          ", deallocated PAW data for type:", nt
         ENDDO
         ENDDO
+#else
+        DO nt = 1,ntyp
+            nnodes = SUM ( info(:,nt) ) 
+            IF ( nnodes > 0 ) WRITE(stdout,'(7x,"PAW data deallocated on ",&
+                    &                        i4," nodes for type:",i3)')   &
+                    &         nnodes,nt
+        ENDDO
+#endif
     ENDIF
 
 END SUBROUTINE PAW_post_init
@@ -323,7 +332,7 @@ SUBROUTINE PAW_init_onecenter()
 
 END SUBROUTINE PAW_init_onecenter
 
-#ifdef __COMPILE_THIS_UNUSED_FUNCTION
+#if defined(__COMPILE_THIS_UNUSED_FUNCTION)
 !___   ___   ___   ___   ___   ___   ___   ___   ___   ___   ___   ___   ___   ___   ___   ___
 !!!!  !!!!  !!!!  !!!!  !!!!  !!!!  !!!!  !!!!  !!!!  !!!!  !!!!  !!!!  !!!!  !!!!  !!!!  !!!! 
 !!! Increase maximum angularm momentum component for integration

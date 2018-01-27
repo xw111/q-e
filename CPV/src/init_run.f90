@@ -21,7 +21,7 @@ SUBROUTINE init_run()
   USE ions_base,                ONLY : na, nax, nat, nsp, iforce, amass, cdms
   USE ions_positions,           ONLY : tau0, taum, taup, taus, tausm, tausp, &
                                        vels, velsm, velsp, fion, fionm
-  USE gvecw,                    ONLY : ngw, ngw_g, ggp, g2kin_init
+  USE gvecw,                    ONLY : ngw, ngw_g, g2kin, g2kin_init
   USE smallbox_gvec,            ONLY : ngb
   USE gvecs,                    ONLY : ngms
   USE gvect,                    ONLY : ngm, gstart, gg
@@ -67,7 +67,7 @@ SUBROUTINE init_run()
   USE io_global,                ONLY : ionode, stdout
   USE printout_base,            ONLY : printout_base_init
   USE wave_types,               ONLY : wave_descriptor_info
-  USE xml_io_base,              ONLY : restart_dir, create_directory, change_directory
+  USE xml_io_base,              ONLY : restart_dir, create_directory
   USE orthogonalize_base,       ONLY : mesure_diag_perf, mesure_mmul_perf
   USE ions_base,                ONLY : ions_reference_positions, cdmi
   USE mp_bands,                 ONLY : nbgrp
@@ -95,6 +95,7 @@ SUBROUTINE init_run()
   !
   ! ... initialize directories
   !
+
   IF( nbeg < 0 ) THEN
      CALL create_directory( tmp_dir )
   END IF 
@@ -146,7 +147,7 @@ SUBROUTINE init_run()
   !=======================================================================
   !
   CALL allocate_mainvar( ngw, ngw_g, ngb, ngms, ngm, dfftp%nr1,dfftp%nr2,dfftp%nr3, dfftp%nr1x, &
-                         dfftp%nr2x, dfftp%npl, dfftp%nnr, dffts%nnr, nat, nax, nsp,   &
+                         dfftp%nr2x, dfftp%my_nr3p, dfftp%nnr, dffts%nnr, nat, nax, nsp,   &
                          nspin, nbsp, nbspx, nupdwn, nkb, gstart, nudx, &
                          tpre, nbspx_bgrp )
   ! 
@@ -213,6 +214,9 @@ SUBROUTINE init_run()
      ALLOCATE( dkedtaus(  dffts%nnr, 3, 3, nspin ) )
      ALLOCATE( gradwfc(   dffts%nnr, 3 ) )
      !
+     if (nspin.ne.1) &
+       CALL errore( ' init_run ', 'spin-polarized stress not implemented for metaGGA', 1 )
+     !
   END IF
   !
   IF ( lwf ) THEN
@@ -278,17 +282,16 @@ SUBROUTINE init_run()
     WRITE( stdout,'(/,3X,"Reference cell parameters are used in electron mass preconditioning")' )
     WRITE( stdout,'(3X,"ref_tpiba2=",F14.8)' ) ref_tpiba2
     CALL g2kin_init( gg, ref_tpiba2 )
-    CALL emass_precond( ema0bg, ggp, ngw, ref_tpiba2, emass_cutoff ) 
+    CALL emass_precond( ema0bg, g2kin, ngw, ref_tpiba2, emass_cutoff ) 
     WRITE( stdout,'(3X,"current_tpiba2=",F14.8)' ) tpiba2
     CALL g2kin_init( gg, tpiba2 )
   ELSE
     WRITE( stdout,'(/,3X,"Cell parameters from input file are used in electron mass preconditioning")' )
     WRITE( stdout,'(3X,"init_tpiba2=",F14.8)' ) init_tpiba2
     CALL g2kin_init( gg, init_tpiba2 )
-    CALL emass_precond( ema0bg, ggp, ngw, init_tpiba2, emass_cutoff ) 
+    CALL emass_precond( ema0bg, g2kin, ngw, init_tpiba2, emass_cutoff ) 
     !WRITE( stdout,'(3X,"current_tpiba2=",F14.8)' ) tpiba2 !BS : DEBUG
     CALL g2kin_init( gg, tpiba2 )
-    !CALL emass_precond( ema0bg, ggp, ngw, tpiba2, emass_cutoff ) 
   END IF
   !
   CALL print_legend( )

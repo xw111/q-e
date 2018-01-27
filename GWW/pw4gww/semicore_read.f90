@@ -13,11 +13,12 @@
   subroutine semicore_read(num_nbnds,numpw, ispin)
 !NOT_TO_BE_INCLUDED_START
      USE io_global,             ONLY : stdout, ionode,ionode_id
-     USE io_files,              ONLY : diropn,prefix, tmp_dir, iunigk
+     USE io_files,              ONLY : diropn,prefix, tmp_dir
      use pwcom
      USE wavefunctions_module,  ONLY : evc
      USE kinds,                 ONLY : DP
-     USE gvect,                 ONLY : ig_l2g
+     USE gvect,                 ONLY : g, ig_l2g, nl, nlm, gstart
+     USE gvecs,                 ONLY : nls, nlsm
      USE mp,           ONLY : mp_sum, mp_barrier, mp_bcast
      USE mp_global,             ONLY : inter_pool_comm, intra_pool_comm
      USE mp_wave, ONLY : mergewf,splitwf
@@ -28,7 +29,7 @@
      USE wvfct,    ONLY : et
      USE lsda_mod,             ONLY : nspin
      USE wannier_gw,           ONLY : max_ngm, l_truncated_coulomb,vg_q,truncation_radius
-     USE constants, ONLY : pi, tpi, fpi
+     USE constants, ONLY : e2, pi, tpi, fpi
      USE cell_base, ONLY: at, alat, tpiba, omega, tpiba2
 
 
@@ -136,8 +137,8 @@
 !trasform them to R grid
 
           psic(:)=(0.d0,0.d0)
-          psic(nls(igk(1:npw)))  = tmp_wfc(1:npw)
-          psic(nlsm(igk(1:npw))) = CONJG( tmp_wfc(1:npw) )
+          psic(nls(igk_k(1:npw,1)))  = tmp_wfc(1:npw)
+          psic(nlsm(igk_k(1:npw,1))) = CONJG( tmp_wfc(1:npw) )
           CALL invfft ('Wave', psic, dffts)
           
           if(ii<num_nbnds)  pp_sc(1:dfftp%nnr,iv,ii)=dble(psic(1:dfftp%nnr))

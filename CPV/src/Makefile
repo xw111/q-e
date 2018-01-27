@@ -1,10 +1,11 @@
 # Makefile for CP/FPMD
 
-include	../../make.sys
+include	../../make.inc
 
 # location of needed modules and included files (if any)
-MODFLAGS= $(MOD_FLAG)../../iotk/src $(MOD_FLAG)../../FFTXlib $(MOD_FLAG)../../Modules $(MOD_FLAG).
-IFLAGS=
+MODFLAGS= $(MOD_FLAG)../../iotk/src $(MOD_FLAG)../../FFTXlib $(MOD_FLAG)../../LAXlib $(MOD_FLAG)../../UtilXlib \
+          $(MOD_FLAG)../../KS_Solvers/CG $(MOD_FLAG)../../KS_Solvers/Davidson $(MOD_FLAG)../../Modules $(MOD_FLAG).
+#IFLAGS=
 
 FOBJS = \
 berryion.o \
@@ -18,6 +19,7 @@ cp_autopilot.o \
 cp_emass.o \
 cp_interfaces.o \
 cp_restart.o \
+cp_restart_new.o \
 cplib.o \
 cpr_mod.o \
 cpr.o \
@@ -44,7 +46,6 @@ fromscra.o \
 gradrho.o \
 gram.o \
 gtable.o \
-gvecw.o\
 init.o \
 init_run.o \
 inner_loop_cold.o \
@@ -119,21 +120,21 @@ entropy.o
 
 QEMODS=../../Modules/libqemod.a
 QEFFT=../../FFTXlib/libqefft.a
+QELA=../../KS_Solvers/CG/libcg.a ../../KS_Solvers/Davidson/libdavid.a ../../LAXlib/libqela.a
+UTIL=../../UtilXlib/libutil.a
 
-TLDEPS= bindir fftlib mods libs libiotk
-
-LIBOBJS= ../../flib/ptools.a ../../flib/flib.a ../../clib/clib.a ../../iotk/src/libiotk.a
+TLDEPS= bindir mods libs libiotk
 
 all : tldeps libcp.a manycp.x cp.x cppp.x wfdd.x
 
-manycp.x : manycp.o libcp.a $(QEMODS) $(QEFFT) $(LIBOBJS)
+manycp.x : manycp.o libcp.a $(QEMODS) $(QEFFT) $(QELA) $(UTIL) $(LIBOBJS)
 	$(LD) $(LDFLAGS) -o manycp.x manycp.o \
-		libcp.a $(QEMODS) $(QEFFT) $(LIBOBJS) $(LIBS)
-	- ( cd ../../bin ; ln -fs ../CPV/src/cp.x . )
+		libcp.a $(QEMODS) $(QEFFT) $(QELA) $(UTIL) $(LIBOBJS) $(LIBS)
+	- ( cd ../../bin ; ln -fs ../CPV/src/manycp.x . )
 
-cp.x : cprstart.o libcp.a $(QEMODS) $(QEFFT) $(LIBOBJS)
+cp.x : cprstart.o libcp.a $(QEMODS) $(QEFFT) $(QELA) $(UTIL) $(LIBOBJS)
 	$(LD) $(LDFLAGS) -o cp.x cprstart.o \
-		libcp.a $(QEMODS) $(QEFFT) $(LIBOBJS) $(LIBS)
+		libcp.a $(QEMODS) $(QEFFT) $(QELA) $(UTIL) $(LIBOBJS) $(LIBS)
 	- ( cd ../../bin ; ln -fs ../CPV/src/cp.x . )
 
 libcp.a : $(FOBJS) $(LOBJS) 
@@ -146,12 +147,12 @@ cpver.h :
 	echo "CHARACTER(LEN=70), PARAMETER :: version_date = '"`date`"'" \
 		> cpver.h
 
-cppp.x : fpmdpp.o $(QEMODS) $(QEFFT) $(LIBOBJS)
-	$(LD) $(LDFLAGS) -o cppp.x fpmdpp.o $(QEMODS) $(QEFFT) $(LIBOBJS) $(LIBS)
+cppp.x : fpmdpp.o $(QEMODS) $(QEFFT) $(QELA) $(UTIL) $(LIBOBJS)
+	$(LD) $(LDFLAGS) -o cppp.x fpmdpp.o $(QEMODS) $(QEFFT) $(QELA) $(UTIL) $(LIBOBJS) $(LIBS)
 	- (cd ../../bin ; ln -fs ../CPV/src/cppp.x . )
 
 wfdd.x : wfdd.o
-	$(LD) $(LDFLAGS) -o $@ wfdd.o $(QEMODS) $(QEFFT) $(LIBOBJS) $(LIBS)
+	$(LD) $(LDFLAGS) -o $@ wfdd.o $(QEMODS) $(QEFFT) $(QELA) $(UTIL) $(LIBOBJS) $(LIBS)
 	- ( cd ../../bin ; ln -fs ../CPV/src/$@ . )
 
 tldeps :
@@ -159,7 +160,7 @@ tldeps :
 	( cd ../.. ; $(MAKE) $(TLDEPS) || exit 1 ) ; fi
 
 clean :
-	- /bin/rm -f cppp.x *.o *.mod cpver.h *.i core* *.F90 fort* \
+	- /bin/rm -f cppp.x *.o *.mod cpver.h *.i core* *_tmp.f90 fort* \
 		*.cpp *.d *.L *.a *.s cp.x manycp.x wfdd.x
 	-/bin/rm -rf ../../bin/manycp.x ../../bin/cppp.x ../../bin/cp.x ../../bin/wfdd.x
 

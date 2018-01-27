@@ -11,7 +11,7 @@
    SUBROUTINE printout_new_x   &
      ( nfi, tfirst, tfilei, tprint, tps, h, stress, tau0, vels, &
        fion, ekinc, temphc, tempp, temps, etot, enthal, econs, econt, &
-       vnhh, xnhh0, vnhp, xnhp0, atot, ekin, epot, print_forces, print_stress, &
+       vnhh, xnhh0, vnhp, xnhp0, vnhe, xnhe0, atot, ekin, epot, print_forces, print_stress, &
        tstdout)
 !=----------------------------------------------------------------------------=!
 
@@ -48,6 +48,7 @@
       USE funct,             ONLY : dft_is_hybrid, exx_is_active
       USE wannier_module,    ONLY : wfc
       USE electrons_base,    ONLY : nbsp, nspin, nupdwn, iupdwn
+      USE wrappers,          ONLY : memstat
       !
       IMPLICIT NONE
       !
@@ -61,13 +62,12 @@
       REAL(DP), INTENT(IN) :: fion( :, : )  ! real forces
       REAL(DP), INTENT(IN) :: ekinc, temphc, tempp, etot, enthal, econs, econt
       REAL(DP), INTENT(IN) :: temps( : ) ! partial temperature for different ionic species
-      REAL(DP), INTENT(IN) :: vnhh( 3, 3 ), xnhh0( 3, 3 ), vnhp( 1 ), xnhp0( 1 )
+      REAL(DP), INTENT(IN) :: vnhh( 3, 3 ), xnhh0( 3, 3 ), vnhp( 1 ), xnhp0( 1 ), vnhe, xnhe0
       REAL(DP), INTENT(IN) :: atot! enthalpy of system for c.g. case
       REAL(DP), INTENT(IN) :: ekin
       REAL(DP), INTENT(IN) :: epot ! ( epseu + eht + exc )
-      LOGICAL, INTENT(IN) :: print_forces, print_stress, tstdout
-   
-   !
+      LOGICAL, INTENT(IN) :: print_forces, print_stress, tstdout   
+      !
       REAL(DP) :: stress_gpa( 3, 3 )
       REAL(DP) :: cdm0( 3 )
       REAL(DP) :: dis( nsp )
@@ -81,8 +81,6 @@
       ! avoid double printing to files by refering to nprint_nfi
       !
       tfile = tfilei .and. ( nfi .gt. nprint_nfi )
-      !
-     
       !
       CALL memstat( kilobytes )
       !
@@ -262,7 +260,7 @@
                   WRITE( 33, 29482 ) nfi,tps,ekinc,temphc,tempp,etot,enthal, &
                                     econs,econt,volume,out_press,(-exx*exxalfa)
                 ELSE    
-#ifdef __OLD_FORMAT
+#if defined(__OLD_FORMAT)
                   WRITE( 33, '(I6,1X,F8.5,1X,F6.1,1X,F6.1,4(1X,F14.5),F10.2, F8.2, F8.5)') &
                                     nfi,ekinc,temphc,tempp,etot,enthal, &
                                     econs,econt,volume,out_press,tps
@@ -276,7 +274,7 @@
               !
             END IF
             !
-            IF( tfile ) WRITE( 39, 2949 ) nfi,tps,vnhh(3,3),xnhh0(3,3),vnhp(1),xnhp0(1)
+            IF( tfile ) WRITE( 39, 2949 ) nfi,tps,vnhh(3,3),xnhh0(3,3),vnhp(1),xnhp0(1), vnhe, xnhe0
             !
             !print Wannier centers at every iprint steps in .wfc file
             !
@@ -476,11 +474,11 @@
 
 29471 FORMAT( '#',3X,'nfi',4X,'time(ps)',8X,'ekinc',8X,'T_cell(K)',5X,'Tion(K)',10X,'etot',15X,'enthal',15X,'econs', &
            & 15X,'econt',10X,'Volume',8X,'Pressure(GPa)',8X,'EXX',15X,'EVDW' )
-29481 FORMAT( I7,4(2X,ES12.6),4(2X,F18.8),2X,ES12.6,2X,F12.5,2(2X,F15.8) )
-29482 FORMAT( I7,4(2X,ES12.6),4(2X,F18.8),2X,ES12.6,2X,F12.5,2X,F15.8 )
-29483 FORMAT( I7,4(2X,ES12.6),4(2X,F18.8),2X,ES12.6,2X,F12.5 )
-29484 FORMAT( I7,2(2X,ES12.6),6(2X,F18.8) )
-2949  FORMAT( I7,2X,ES12.6,4(1X,F15.8) )
+29481 FORMAT( I7,4(1X,ES13.6),4(2X,F18.8),1X,ES13.6,2X,F12.5,2(2X,F15.8) )
+29482 FORMAT( I7,4(1X,ES13.6),4(2X,F18.8),1X,ES13.6,2X,F12.5,2X,F15.8 )
+29483 FORMAT( I7,4(1X,ES13.6),4(2X,F18.8),1X,ES13.6,2X,F12.5 )
+29484 FORMAT( I7,2(1X,ES13.6),6(2X,F18.8) )
+2949  FORMAT( I7,1X,ES13.6,6(1X,F15.8) )
       !
       RETURN
    END SUBROUTINE printout_new_x

@@ -1,23 +1,23 @@
 # Makefile for school
 
-include ../../make.sys
+include ../../make.inc
 
 # location of include files
 #IFLAGS=-I../../../include
 
 # location of needed modules
 MODFLAGS= $(MOD_FLAG)../../iotk/src $(MOD_FLAG)../../Modules \
-          $(MOD_FLAG)../../FFTXlib $(MOD_FLAG)../../PW/src $(MOD_FLAG).
+          $(MOD_FLAG)../../LAXlib $(MOD_FLAG)../../UtilXlib $(MOD_FLAG)../../FFTXlib \
+          $(MOD_FLAG)../../PW/src $(MOD_FLAG)../../KS_Solvers/CG $(MOD_FLAG) ../../KS_Solvers/Davidson \
+          $(MOD_FLAG)../../dft-d3 $(MOD_FLAG).
 
-#location of needed libraries
-LIBOBJS= ../../iotk/src/libiotk.a ../../flib/flib.a \
-         ../../clib/clib.a ../../flib/ptools.a 
 
 FDOBJS = \
         stop_pp.o 
 
 
-QEMODS = ../../Modules/libqemod.a ../../FFTXlib/libqefft.a
+QEMODS = ../../Modules/libqemod.a ../../FFTXlib/libqefft.a ../../KS_Solvers/CG/libcg.a ../../KS_Solvers/Davidson/libdavid.a \
+         ../../LAXlib/libqela.a ../../UtilXlib/libutil.a ../../dft-d3/libdftd3qe.a
 PWOBJS = ../../PW/src/libpw.a
 
 
@@ -48,7 +48,7 @@ libfd.a : $(FDOBJS)
 	$(RANLIB) $@
 
 clean :
-	- /bin/rm -f *.x *.o *~ *.F90 *.d *.mod *.i *.L libfd.a
+	- /bin/rm -f *.x *.o *~ *_tmp.f90 *.d *.mod *.i *.L libfd.a
 
 include make.depend
 # DO NOT DELETE

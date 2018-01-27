@@ -19,17 +19,20 @@ subroutine psidspsi (ik, uact, pdsp)
   USE kinds,     ONLY : DP
   USE cell_base, ONLY : tpiba
   USE gvect,     ONLY : g
-  USE klist,     ONLY : xk
+  USE klist,     ONLY : xk, ngk, igk_k
   USE ions_base, ONLY : nat, ityp, ntyp => nsp
   USE lsda_mod,  ONLY : lsda, current_spin, isk
   USE spin_orb,  ONLY : lspinorb
   USE noncollin_module, ONLY : noncolin, npol
   USE wavefunctions_module,    ONLY : evc
-  USE wvfct,     ONLY : nbnd, npw, npwx, igk
-  USE uspp,      ONLY: nkb, vkb, qq, qq_so
+  USE wvfct,     ONLY : nbnd, npwx
+  USE uspp,      ONLY: nkb, vkb, qq_nt, qq_so
   USE uspp_param,ONLY : nh
-  USE phus,      ONLY : becp1, alphap
-  USE control_ph, ONLY : lgamma
+  USE phus,      ONLY : alphap
+
+  USE lrus,       ONLY : becp1
+  USE control_lr, ONLY : lgamma
+
   implicit none
   !
   !   The dummy variables
@@ -45,7 +48,7 @@ subroutine psidspsi (ik, uact, pdsp)
   !
 
   integer :: na, nb, mu, nu, ikk, ikq, ig, igg, nt, ibnd, jbnd, ijkb0, &
-       ikb, jkb, ih, jh, ipol, is
+       ikb, jkb, ih, jh, ipol, is, npw
   ! counter on atoms
   ! counter on modes
   ! the point k
@@ -87,6 +90,7 @@ subroutine psidspsi (ik, uact, pdsp)
   if (lgamma) then
      ikk = ik
      ikq = ik
+     npw = ngk(ik)
   else
      call infomsg ('psidspsi', 'called for lgamma .eq. false')
   endif
@@ -147,23 +151,23 @@ subroutine psidspsi (ik, uact, pdsp)
                              else
                                 do is=1,npol
                                    ps1_nc(ikb,is,ibnd)=ps1_nc(ikb,is,ibnd) +   &
-                                     qq(ih,jh,nt)*                          &
+                                     qq_nt(ih,jh,nt)*                          &
                                      alphap(ipol,ik)%nc(jkb,is,ibnd)*        &
                                      uact (mu + ipol)
                                    ps2_nc(ikb,is,ipol,ibnd)=                 &
                                          ps2_nc(ikb,is,ipol,ibnd) +          &
-                                     qq (ih, jh, nt) *(0.d0, -1.d0)*         &
+                                     qq_nt (ih, jh, nt) *(0.d0, -1.d0)*         &
                                      becp1(ik)%nc (jkb,is,ibnd) *            &
                                      uact (mu + ipol) * tpiba
                                 enddo
                              endif
                           else
                              ps1 (ikb, ibnd) = ps1 (ikb, ibnd) +    &
-                               qq (ih, jh, nt) *                 &
+                               qq_nt (ih, jh, nt) *                 &
                                alphap(ipol,ik)%k(jkb,ibnd) *     &
                                uact (mu + ipol)
                              ps2 (ikb, ipol, ibnd) = ps2 (ikb, ipol, ibnd) + &
-                               qq (ih, jh, nt) *                          &
+                               qq_nt (ih, jh, nt) *                          &
                                (0.d0, -1.d0) *                            &
                                becp1(ik)%k (jkb, ibnd) *                  &
                                uact (mu + ipol) * tpiba
@@ -206,7 +210,7 @@ subroutine psidspsi (ik, uact, pdsp)
         enddo
         if (ok) then
            do ig = 1, npw
-              igg = igk (ig)
+              igg = igk_k (ig,ikk)
               aux (ig) =  vkb(ig, ikb) *    &
                    (xk(ipol, ik) + g(ipol, igg) )
            enddo

@@ -46,7 +46,7 @@ PROGRAM importexportbinary
   !
   ! Initialise environment
   !
-#ifdef __MPI
+#if defined(__MPI)
   CALL mp_startup ( )
 #endif
   CALL environment_start ( 'IMPORTEXPORT' )
@@ -72,13 +72,12 @@ SUBROUTINE impexp ()
   !-----------------------------------------------------------------------
 
   USE kinds,     ONLY : DP
-  USE io_files,  ONLY : tmp_dir, prefix, psfile, pseudo_dir, xmlpun_base
+  USE io_files,  ONLY : tmp_dir, prefix, psfile, pseudo_dir, xmlpun
   USE ions_base, ONLY : nsp
   USE io_global, ONLY : ionode, ionode_id
   USE mp,        ONLY : mp_bcast
   USE mp_world,  ONLY : world_comm
-  USE pw_restart,    ONLY : pw_readfile
-  USE io_rho_xml,    ONLY : read_rho, write_rho
+  USE io_rho_xml,    ONLY : write_scf
   USE scf,           ONLY : rho
   USE lsda_mod,      ONLY : nspin
   USE xml_io_base,   ONLY : rho_binary, create_directory
@@ -191,19 +190,19 @@ SUBROUTINE impexp ()
   end if
 
   ! Now I can store the new charge density in the proper binary/non-binary format
-  CALL write_rho(rho, nspin)
+  CALL write_scf(rho, nspin)
   
   ! I need to copy XML file
-  filename =  TRIM( xmlpun_base ) // '.xml'
-  sourcef = TRIM( old_tmp_dir ) // TRIM( prefix ) // '.save' // "/" // TRIM( filename )
-  destf   = TRIM( new_tmp_dir ) // TRIM( prefix ) // '.save' // "/" // TRIM( filename )
+  filename =  TRIM( xmlpun )
+  sourcef = TRIM( old_tmp_dir ) // TRIM( prefix ) // '.save/' // TRIM( filename )
+  destf   = TRIM( new_tmp_dir ) // TRIM( prefix ) // '.save/' // TRIM( filename )
   ios = f_copy( TRIM( sourcef ), TRIM( destf ))
-  IF ( ios /= 0) CALL errore ('importexport', 'copying the data-file.xml file', abs(ios))
+  IF ( ios /= 0) CALL errore ('importexport', 'copying the '//TRIM(filename)//' file', abs(ios))
 
   ! I also need to copy the UPF files
   do l=1, nsp
-     sourcef = TRIM( old_tmp_dir ) // TRIM( prefix ) // '.save' // "/" // TRIM(psfile(l))
-     destf = TRIM( new_tmp_dir ) // TRIM( prefix ) // '.save' // "/" // TRIM(psfile(l))
+     sourcef = TRIM( old_tmp_dir ) // TRIM( prefix ) // '.save/' // TRIM(psfile(l))
+     destf = TRIM( new_tmp_dir ) // TRIM( prefix ) // '.save/' // TRIM(psfile(l))
      ios = f_copy( TRIM( sourcef ), TRIM( destf ))
      IF ( ios /= 0) CALL errore ('importexport', 'copying the ' // TRIM(psfile(l)) // ' pseudo', abs(ios))
   end do

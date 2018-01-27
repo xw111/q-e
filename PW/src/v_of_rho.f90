@@ -21,7 +21,7 @@ SUBROUTINE v_of_rho( rho, rho_core, rhog_core, &
   USE noncollin_module, ONLY : noncolin, nspin_lsda
   USE ions_base,        ONLY : nat, tau
   USE ldaU,             ONLY : lda_plus_U 
-  USE funct,            ONLY : dft_is_meta
+  USE funct,            ONLY : dft_is_meta, get_meta
   USE scf,              ONLY : scf_type
   USE cell_base,        ONLY : alat
   USE control_flags,    ONLY : ts_vdw
@@ -53,7 +53,7 @@ SUBROUTINE v_of_rho( rho, rho_core, rhog_core, &
   !
   ! ... calculate exchange-correlation potential
   !
-  if (dft_is_meta()) then
+  if (dft_is_meta() .and. (get_meta() /= 4)) then
      call v_xc_meta( rho, rho_core, rhog_core, etxc, vtxc, v%of_r, v%kin_r )
   else
      CALL v_xc( rho, rho_core, rhog_core, etxc, vtxc, v%of_r )
@@ -251,7 +251,7 @@ SUBROUTINE v_xc_meta( rho, rho_core, rhog_core, etxc, vtxc, v, kedtaur )
           !
           ! h contains D(rho*Exc)/D(|grad rho|) * (grad rho) / |grad rho|
           !
-          if (get_meta()==1) then  ! tpss functional
+          if (get_meta()==1 .OR.get_meta()==5 ) then  ! tpss, scan
             !
             h(:,k,1) = (v2xup * grhoup(:) + v2cup(:)) * e2
             h(:,k,2) = (v2xdw * grhodw(:) + v2cdw(:)) * e2
@@ -544,6 +544,7 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
   USE mp,        ONLY: mp_sum
   USE martyna_tuckerman, ONLY : wg_corr_h, do_comp_mt
   USE esm,       ONLY: do_comp_esm, esm_hartree, esm_bc
+  USE Coul_cut_2D, ONLY : do_cutoff_2D, cutoff_2D, cutoff_hartree  
   !
   IMPLICIT NONE
   !
@@ -586,28 +587,32 @@ SUBROUTINE v_h( rhog, ehart, charge, v )
      ehart     = 0.D0
      aux1(:,:) = 0.D0
      !
+     IF (do_cutoff_2D) THEN  !TS
+        CALL cutoff_hartree(rhog, aux1, ehart)
+     ELSE
 !$omp parallel do private( fac, rgtot_re, rgtot_im ), reduction(+:ehart)
-     DO ig = gstart, ngm
-        !
-        fac = 1.D0 / gg(ig)
-        !
-        rgtot_re = REAL(  rhog(ig,1) )
-        rgtot_im = AIMAG( rhog(ig,1) )
-        !
-        IF ( nspin == 2 ) THEN
+        DO ig = gstart, ngm
            !
-           rgtot_re = rgtot_re + REAL(  rhog(ig,2) )
-           rgtot_im = rgtot_im + AIMAG( rhog(ig,2) )
+           fac = 1.D0 / gg(ig) 
            !
-        END IF
-        !
-        ehart = ehart + ( rgtot_re**2 + rgtot_im**2 ) * fac
-        !
-        aux1(1,ig) = rgtot_re * fac
-        aux1(2,ig) = rgtot_im * fac
-        !
-     ENDDO
+           rgtot_re = REAL(  rhog(ig,1) )
+           rgtot_im = AIMAG( rhog(ig,1) )
+           !
+           IF ( nspin == 2 ) THEN
+              !
+              rgtot_re = rgtot_re + REAL(  rhog(ig,2) )
+              rgtot_im = rgtot_im + AIMAG( rhog(ig,2) )
+              !
+           END IF
+           !
+           ehart = ehart + ( rgtot_re**2 + rgtot_im**2 ) * fac
+           !
+           aux1(1,ig) = rgtot_re * fac
+           aux1(2,ig) = rgtot_im * fac
+           !
+        ENDDO
 !$omp end parallel do
+     ENDIF
      !
      fac = e2 * fpi / tpiba2
      !
@@ -772,7 +777,7 @@ SUBROUTINE v_hubbard(ns, v_hub, eth)
 !-- output of hubbard energies:
     IF ( iverbosity > 0 ) THEN
       write(stdout,*) '--- in v_hubbard ---'
-      write(stdout,'(''Hubbard energy '',f9.4)') eth
+      write(stdout,'("Hubbard energy ",f9.4)') eth
       write(stdout,*) '-------'
     ENDIF
 !--
@@ -868,7 +873,7 @@ SUBROUTINE v_hubbard(ns, v_hub, eth)
 !-- output of hubbard energies:
     IF ( iverbosity > 0 ) THEN
       write(stdout,*) '--- in v_hubbard ---'
-      write(stdout,'(''Hubbard energies (dc, U, total) '',3f9.4)') eth_dc, eth_u, eth
+      write(stdout,'("Hubbard energies (dc, U, total) ",3f9.4)') eth_dc, eth_u, eth
       write(stdout,*) '-------'
     ENDIF
 !--
@@ -1044,7 +1049,7 @@ SUBROUTINE v_hubbard_nc(ns, v_hub, eth)
 !-- output of hubbard energies:
   IF ( iverbosity > 0 ) THEN
     write(stdout,*) '--- in v_hubbard ---'
-    write(stdout,'(''Hub. E (dc, noflip, flip, total) '',4f9.4)') &
+    write(stdout,'("Hub. E (dc, noflip, flip, total) ",4f9.4)') &
                                  eth_dc, eth_noflip, eth_flip, eth 
     write(stdout,*) '-------'
   ENDIF
@@ -1134,7 +1139,7 @@ SUBROUTINE gradv_h_of_rho_r( rho, gradv )
   ! ... Bring rho to G space
   !
   ALLOCATE( rhoaux( dfftp%nnr ) )
-  rhoaux( : ) = CMPLX( rho( : ), 0.D0 ) 
+  rhoaux( : ) = CMPLX( rho( : ), 0.D0, KIND=dp ) 
   !
   CALL fwfft('Dense', rhoaux, dfftp)
   !
@@ -1144,7 +1149,7 @@ SUBROUTINE gradv_h_of_rho_r( rho, gradv )
   !
   DO ipol = 1, 3
     !
-    gaux(:) = CMPLX(0.d0,0.d0,kind=dp)
+    gaux(:) = (0.0_dp,0.0_dp)
     !
     DO ig = gstart, ngm
       !

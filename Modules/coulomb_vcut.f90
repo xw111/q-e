@@ -72,10 +72,13 @@ CONTAINS
 
   ! automatically finds whether the cell is orthorombic or not
   vcut%orthorombic=.false.
-  mod2a=sum(vcut%a**2,1)
-  if(sum(vcut%a(:,1)*vcut%a(:,2))/(mod2a(1)*mod2a(2))<eps6 .and. &
-     sum(vcut%a(:,2)*vcut%a(:,3))/(mod2a(2)*mod2a(3))<eps6 .and. &
-     sum(vcut%a(:,3)*vcut%a(:,1))/(mod2a(3)*mod2a(1))<eps6) vcut%orthorombic=.true.
+  !
+  mod2a=sqrt(sum(vcut%a**2,1))
+  if(abs(sum(vcut%a(:,1)*vcut%a(:,2)))/(mod2a(1)*mod2a(2))<eps6 .and. &
+     abs(sum(vcut%a(:,2)*vcut%a(:,3)))/(mod2a(2)*mod2a(3))<eps6 .and. &
+     abs(sum(vcut%a(:,3)*vcut%a(:,1)))/(mod2a(3)*mod2a(1))<eps6) vcut%orthorombic=.true.
+  !
+  if (.not.vcut%orthorombic) call errore(subname,"non-orthorombic case untested",1)
 
   n1=ceiling(vcut%cutoff*sqrt(sum(vcut%a(1,:)**2))/(2.0*pi))
   n2=ceiling(vcut%cutoff*sqrt(sum(vcut%a(2,:)**2))/(2.0*pi))
@@ -98,7 +101,7 @@ CONTAINS
         IF( SUM(q**2) > vcut%cutoff**2 ) CYCLE
         !
         vcut%corrected(i1,i2,i3) = &
-             vcut_formula(q,vcut%a,vcut%b,vcut%a_omega,vcut%b_omega,vcut%orthorombic)
+             vcut_formula(q,vcut%a,vcut%b,vcut%a_omega,vcut%orthorombic)
         !
       ENDDO
     ENDDO
@@ -209,7 +212,7 @@ END FUNCTION vcut_get
 END FUNCTION vcut_spheric_get
 
 !---------------------------------------------------------
-  FUNCTION vcut_formula(q,a,b,a_omega,b_omega,orthorombic) result(res)
+  FUNCTION vcut_formula(q,a,b,a_omega,orthorombic) result(res)
   !---------------------------------------------------------
   !
   ! Define the FT of the Coulomb potential according to the
@@ -219,19 +222,11 @@ END FUNCTION vcut_spheric_get
   REAL(DP), INTENT(IN) :: a(3,3)
   REAL(DP), INTENT(IN) :: b(3,3)
   REAL(DP), INTENT(IN) :: a_omega
-  REAL(DP), INTENT(IN) :: b_omega
   LOGICAL,  INTENT(IN) :: orthorombic
   REAL(DP)             :: res
   !
-  integer  :: i1,i2,i3
-  integer  :: n1,n2,n3
-  real(dp) :: d1,d2,d3
   real(dp) :: rwigner
   real(dp) :: sigma
-  real(dp) :: weight ! weight of each point in the real space integral
-  real(dp) :: factor ! factor for symmetry and ws border
-  real(dp) :: tmp
-  real(dp) :: r(3),r2
 
   rwigner=0.5*sqrt(1.0/maxval(sum(b**2,1)))*2*pi
 
@@ -241,20 +236,19 @@ END FUNCTION vcut_spheric_get
   sigma=3.0/rwigner
 
   ! compute longrange and shortrange contributions
-  res=vcut_formula_longrange(q,a,b,a_omega,b_omega,sigma,6.0D0,orthorombic) &
+  res=vcut_formula_longrange(q,a,b,a_omega,sigma,6.0D0,orthorombic) &
      +vcut_formula_shortrange(q,sigma)
 
 END FUNCTION vcut_formula
 
 !---------------------------------------------------------
-  FUNCTION vcut_formula_longrange(q,a,b,a_omega,b_omega,sigma,security,orthorombic) result(res)
+  FUNCTION vcut_formula_longrange(q,a,b,a_omega,sigma,security,orthorombic) result(res)
   !---------------------------------------------------------
   ! compute the longrange contribution
   real(dp), intent(in) :: q(3)
   real(dp), intent(in) :: a(3,3)
   real(dp), intent(in) :: b(3,3)
   real(dp), intent(in) :: a_omega
-  real(dp), intent(in) :: b_omega
   real(dp), intent(in) :: sigma
   real(dp), intent(in) :: security ! it determines the grid for the real-space sum; a reasonable value is 4.0
   logical,  intent(in) :: orthorombic
@@ -264,7 +258,7 @@ END FUNCTION vcut_formula
   real(dp) :: d1,d2,d3,weight,factor
   real(dp) :: r(3),r2,modr
   logical :: n1_is_even,n1_is_odd
-  real(dp) :: tmp
+  real(dp) :: tmp, rtmp(3)
   logical, parameter :: shifted=.false.
   integer :: n1max
   real(dp) :: i1_real,i2_real,i3_real
@@ -313,7 +307,8 @@ END FUNCTION vcut_formula
       do i3=0,n3-1
         i3_real=i3
         if(shifted) i3_real=i3_real+0.5
-        r=vcut_minimal_image(a,b,matmul(a,(/i1_real*d1,i2_real*d2,i3_real*d3/)),orthorombic)
+        rtmp=matmul(a,(/i1_real*d1,i2_real*d2,i3_real*d3/))
+        r=vcut_minimal_image(a,b,rtmp,orthorombic)
         r2=sum(r**2)
         modr=sqrt(r2)
         if(modr*sigma<eps6) then

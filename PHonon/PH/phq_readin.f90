@@ -1,6 +1,5 @@
 !
-
-! Copyright (C) 2001-2013 Quantum ESPRESSO group
+! Copyright (C) 2001-2016 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -23,12 +22,12 @@ SUBROUTINE phq_readin()
   USE mp,            ONLY : mp_bcast
   USE mp_world,      ONLY : world_comm
   USE ions_base,     ONLY : amass, atm
-  USE input_parameters, ONLY : max_seconds, nk1, nk2, nk3, k1, k2, k3
+  USE check_stop,    ONLY : max_seconds
+  USE input_parameters, ONLY : nk1, nk2, nk3, k1, k2, k3
   USE start_k,       ONLY : reset_grid
-  USE klist,         ONLY : xk, nks, nkstot, lgauss, two_fermi_energies, lgauss
-  USE ktetra,        ONLY : ltetra
+  USE klist,         ONLY : xk, nks, nkstot, lgauss, two_fermi_energies, ltetra
   USE control_flags, ONLY : gamma_only, tqr, restart, lkpoint_dir, io_level, &
-                            llondon, ts_vdw
+                            ts_vdw
   USE funct,         ONLY : dft_is_nonlocc, dft_is_hybrid
   USE uspp,          ONLY : okvan
   USE fixed_occ,     ONLY : tfixed_occ
@@ -37,10 +36,10 @@ SUBROUTINE phq_readin()
   USE spin_orb,      ONLY : domag
   USE cellmd,        ONLY : lmovecell
   USE run_info, ONLY : title
-  USE control_ph,    ONLY : maxter, alpha_mix, lgamma, lgamma_gamma, epsil, &
+  USE control_ph,    ONLY : maxter, alpha_mix, lgamma_gamma, epsil, &
                             zue, zeu, xmldyn, newgrid,                      &
                             trans, reduce_io, tr2_ph, niter_ph,       &
-                            nmix_ph, ldisp, recover, lrpa, lnoloc, start_irr, &
+                            nmix_ph, ldisp, recover, lnoloc, start_irr, &
                             last_irr, start_q, last_q, current_iq, tmp_dir_ph, &
                             ext_recover, ext_restart, u_from_file, ldiag, &
                             search_sym, lqdir, electron_phonon, tmp_dir_phq, &
@@ -49,11 +48,10 @@ SUBROUTINE phq_readin()
 
   USE save_ph,       ONLY : tmp_dir_save, save_ph_input_variables
   USE gamma_gamma,   ONLY : asr
-  USE qpoint,        ONLY : nksq, xq
   USE partial,       ONLY : atomo, nat_todo, nat_todo_input
   USE output,        ONLY : fildyn, fildvscf, fildrho
   USE disp,          ONLY : nq1, nq2, nq3, x_q, wq, nqs, lgamma_iq
-  USE io_files,      ONLY : outdir, tmp_dir, prefix
+  USE io_files,      ONLY : tmp_dir, prefix
   USE noncollin_module, ONLY : i_cons, noncolin
   USE ldaU,          ONLY : lda_plus_u
   USE control_flags, ONLY : iverbosity, modenum, twfcollect
@@ -73,9 +71,15 @@ SUBROUTINE phq_readin()
   USE el_phon,       ONLY : elph,elph_mat,elph_simple,elph_nbnd_min, elph_nbnd_max, &
                             el_ph_sigma, el_ph_nsigma, el_ph_ngauss,auxdvscf
   USE dfile_star,    ONLY : drho_star, dvscf_star
+
+  USE qpoint,        ONLY : nksq, xq
+  USE control_lr,    ONLY : lgamma, lrpa
+
   ! YAMBO >
   USE YAMBO,         ONLY : elph_yambo,dvscf_yambo
   ! YAMBO <
+  USE elph_tetra_mod,ONLY : elph_tetra, lshift_q, in_alpha2f
+  USE ktetra,        ONLY : tetra_type
   !
   IMPLICIT NONE
   !
@@ -89,7 +93,7 @@ SUBROUTINE phq_readin()
     ! counter on types
   REAL(DP) :: amass_input(nsx)
     ! save masses read from input here
-  CHARACTER (LEN=256) :: filename
+  CHARACTER (LEN=256) :: outdir, filename
   CHARACTER (LEN=8)   :: verbosity
   CHARACTER(LEN=80)          :: card
   CHARACTER(LEN=1), EXTERNAL :: capital
@@ -116,9 +120,10 @@ SUBROUTINE phq_readin()
                        start_q, last_q, nogg, ldiag, search_sym, lqdir, &
                        nk1, nk2, nk3, k1, k2, k3, &
                        drho_star, dvscf_star, only_init, only_wfc, &
-                       elph_nbnd_min, elph_nbnd_max, el_ph_ngauss,el_ph_nsigma, el_ph_sigma,  &
-                       electron_phonon, &
-                       q_in_band_form, q2d, qplot, low_directory_check
+                       elph_nbnd_min, elph_nbnd_max, el_ph_ngauss, &
+                       el_ph_nsigma, el_ph_sigma,  electron_phonon, &
+                       q_in_band_form, q2d, qplot, low_directory_check, &
+                       lshift_q
 
   ! tr2_ph       : convergence threshold
   ! amass        : atomic masses
@@ -245,10 +250,8 @@ SUBROUTINE phq_readin()
   elop         = .FALSE.
   max_seconds  =  1.E+7_DP
   reduce_io    = .FALSE.
-  IF ( TRIM(outdir) == './') THEN
-     CALL get_environment_variable( 'ESPRESSO_TMPDIR', outdir )
-     IF ( TRIM( outdir ) == ' ' ) outdir = './'
-  ENDIF
+  CALL get_environment_variable( 'ESPRESSO_TMPDIR', outdir )
+  IF ( TRIM( outdir ) == ' ' ) outdir = './'
   prefix       = 'pwscf'
   fildyn       = 'matdyn'
   fildrho      = ' '
@@ -297,6 +300,8 @@ SUBROUTINE phq_readin()
   IF ( TRIM( dvscf_star%dir ) == ' ' ) &
       dvscf_star%dir = TRIM(outdir)//"/Rotated_DVSCF/"
   !
+  lshift_q = .false.
+  !
   ! ...  reading the namelist inputph
   !
   IF (meta_ionode) THEN
@@ -328,12 +333,12 @@ SUBROUTINE phq_readin()
   !
   ! ...  broadcast all input variables
   !
+  tmp_dir = trimcheck (outdir)
   CALL bcast_ph_input ( )
   CALL mp_bcast(nogg, meta_ionode_id, world_comm  )
   CALL mp_bcast(q2d, meta_ionode_id, world_comm  )
   CALL mp_bcast(q_in_band_form, meta_ionode_id, world_comm  )
   !
-  tmp_dir = trimcheck (outdir)
   drho_star%dir=trimcheck(drho_star%dir)
   dvscf_star%dir=trimcheck(dvscf_star%dir)
   ! filename for the star must always be automatically generated:
@@ -365,6 +370,8 @@ SUBROUTINE phq_readin()
   IF (modenum < 0) CALL errore ('phq_readin', ' Wrong modenum ', 1)
   IF (dek <= 0.d0) CALL errore ( 'phq_readin', ' Wrong dek ', 1)
   !
+  !
+  elph_tetra = 0
   SELECT CASE( trim( electron_phonon ) )
   CASE( 'simple'  )
      elph=.true.
@@ -396,6 +403,24 @@ SUBROUTINE phq_readin()
      nogg=.true.
      auxdvscf=trim(fildvscf)
   ! YAMBO <
+  CASE( 'lambda_tetra'  )
+     elph=.true.
+     elph_mat=.false.
+     elph_simple=.false.
+     trans = .false.
+     elph_tetra = 1
+  CASE( 'gamma_tetra'  )
+     elph=.true.
+     elph_mat=.false.
+     elph_simple=.false.
+     trans = .false.
+     elph_tetra = 2
+  CASE( 'scdft_input'  )
+     elph=.true.
+     elph_mat=.false.
+     elph_simple=.false.
+     trans = .false.
+     elph_tetra = 3
   CASE DEFAULT
      elph=.false.
      elph_mat=.false.
@@ -556,7 +581,7 @@ SUBROUTINE phq_readin()
 !
 !   We check if the bands and the information on the pw run are in the directory
 !   written by the phonon code for the current q point. If the file exists
-!   we read from there, otherwise use the information in outdir.
+!   we read from there, otherwise use the information in tmp_dir.
 !
      IF (lqdir) THEN
         tmp_dir_phq= TRIM (tmp_dir_ph) //TRIM(prefix)//&
@@ -565,7 +590,11 @@ SUBROUTINE phq_readin()
         IF (.NOT.ext_recover.AND..NOT.ext_restart) tmp_dir_phq=tmp_dir_ph
      ENDIF
      !
+#if defined (__OLDXML)
      filename=TRIM(tmp_dir_phq)//TRIM(prefix)//'.save/data-file.xml'
+#else
+     filename=TRIM(tmp_dir_phq)//TRIM(prefix)//'.save/data-file-schema.xml'
+#endif
      IF (ionode) inquire (file =TRIM(filename), exist = exst)
      !
      CALL mp_bcast( exst, ionode_id, intra_image_comm )
@@ -634,14 +663,11 @@ SUBROUTINE phq_readin()
   IF (lda_plus_u) CALL errore('phq_readin',&
      'The phonon code with LDA+U is not yet available',1)
 
-  IF (llondon) CALL errore('phq_readin',&
-     'The phonon code with DFT-D is not yet available',1)
-
   IF (ts_vdw) CALL errore('phq_readin',&
      'The phonon code with TS-VdW is not yet available',1)
 
-  IF ( dft_is_nonlocc() ) CALL errore('phq_readin',&
-     'The phonon code with non-local vdW functionals is not yet available',1)
+!  IF ( dft_is_nonlocc() ) CALL errore('phq_readin',&
+!     'The phonon code with non-local vdW functionals is not yet available',1)
 
   IF ( dft_is_hybrid() ) CALL errore('phq_readin',&
      'The phonon code with hybrid functionals is not yet available',1)
@@ -663,19 +689,15 @@ SUBROUTINE phq_readin()
 
   IF (reduce_io) io_level=0
 
-  IF (nproc_image /= nproc_image_file .and. .not. twfcollect)  &
+  IF (nproc_image /= nproc_image_file .and. .not. twfcollect  .AND. .NOT. in_alpha2f)  &
      CALL errore('phq_readin',&
      'pw.x run with a different number of processors. Use wf_collect=.true.',1)
 
-  IF (nproc_pool /= nproc_pool_file .and. .not. twfcollect)  &
+  IF (nproc_pool /= nproc_pool_file .and. .not. twfcollect .AND. .NOT. in_alpha2f)  &
      CALL errore('phq_readin',&
      'pw.x run with a different number of pools. Use wf_collect=.true.',1)
   !
-  !   Task groups not used in phonon. Activated only in some places
-  !
-  IF (ntask_groups > 1) dffts%have_task_groups=.FALSE.
-
-  IF (nproc_bgrp_file /= nproc_bgrp .AND. .NOT. twfcollect) &
+  IF (nproc_bgrp_file /= nproc_bgrp .AND. .NOT. twfcollect .AND. .NOT. in_alpha2f) &
      CALL errore('phq_readin','pw.x run with different band parallelization',1)
   
   if(elph_mat.and.fildvscf.eq.' ') call errore('phq_readin',&
@@ -687,6 +709,9 @@ SUBROUTINE phq_readin()
   IF(elph.and.nimage>1) call errore('phq_readin',&
        'el-ph with images not implemented',1)
   
+  IF( fildvscf /= ' ' .and. nimage > 1 ) call errore('phq_readin',&
+       'saving dvscf to file images not implemented',1)
+
   IF (elph.OR.fildvscf /= ' ') lqdir=.TRUE.
 
   IF(dvscf_star%open.and.nimage>1) CALL errore('phq_readin',&
@@ -758,7 +783,7 @@ SUBROUTINE phq_readin()
      CALL errore('phq_readin','phonon with arbitrary occupations not tested',1)
   !
   !YAMBO >
-  IF (elph.AND..NOT.lgauss.and..NOT.elph_yambo) CALL errore ('phq_readin', 'Electron-&
+  IF (elph.AND..NOT.(lgauss .or. ltetra).and..NOT.elph_yambo) CALL errore ('phq_readin', 'Electron-&
        &phonon only for metals', 1)
   !YAMBO <
   IF (elph.AND.fildvscf.EQ.' ') CALL errore ('phq_readin', 'El-ph needs &
@@ -778,7 +803,7 @@ SUBROUTINE phq_readin()
   ENDIF
   nat_todo_input=nat_todo
 
-  IF (epsil.AND.lgauss) &
+  IF (epsil.AND.(lgauss .OR. ltetra)) &
         CALL errore ('phq_readin', 'no elec. field with metals', 1)
   IF (modenum > 0) THEN
      IF ( ldisp ) &
@@ -786,7 +811,15 @@ SUBROUTINE phq_readin()
           & single mode calculation not possibile !',1)
      nat_todo = 0
   ENDIF
-
+  !
+  ! Tetrahedron method for DFPT and El-Ph
+  !
+  IF(ltetra .AND. tetra_type == 0) &
+  &  CALL errore ('phq_readin', 'DFPT with the Blochl correction is not implemented', 1)
+  !
+  IF(.NOT. ltetra .AND. elph_tetra /= 0) &
+  &  CALL errore ('phq_readin', '"electron_phonon" and "occupation" are inconsistent.', 1)
+  !
   IF (modenum > 0 .OR. lraman ) lgamma_gamma=.FALSE.
   IF (.NOT.lgamma_gamma) asr=.FALSE.
   !

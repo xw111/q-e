@@ -75,10 +75,10 @@ SUBROUTINE check_initial_status(auxdyn)
   USE disp,            ONLY : nqs, x_q, comp_iq, nq1, nq2, nq3, &
                               done_iq, lgamma_iq
   USE qpoint,          ONLY : xq
+  USE control_lr,      ONLY : lgamma
   USE output,          ONLY : fildyn
   USE control_ph,      ONLY : ldisp, recover, where_rec, rec_code, &
-                              start_q, last_q, current_iq, &
-                              tmp_dir_ph, lgamma, &
+                              start_q, last_q, current_iq, tmp_dir_ph, &
                               ext_recover, ext_restart, tmp_dir_phq, lqdir, &
                               start_irr, last_irr, newgrid, qplot, &
                               done_zeu, done_start_zstar, done_epsil, &
@@ -88,7 +88,7 @@ SUBROUTINE check_initial_status(auxdyn)
   USE ph_restart,      ONLY : check_directory_phsave, check_available_bands,&
                               allocate_grid_variables, ph_writefile
   USE freq_ph,         ONLY : current_iu
-  USE io_rho_xml,      ONLY : write_rho
+  USE io_rho_xml,      ONLY : write_scf
   USE mp_images,       ONLY : nimage, intra_image_comm
   USE io_global,       ONLY : ionode, ionode_id
   USE io_files,        ONLY : prefix
@@ -254,15 +254,15 @@ SUBROUTINE check_initial_status(auxdyn)
   IF (acfdt_is_active) THEN
      ! ACFDT -test always write rho on file
      IF (acfdt_num_der) THEN
-        CALL write_rho( rho, nspin )
+        CALL write_scf( rho, nspin )
      ELSE 
         IF ((ldisp.OR..NOT.lgamma.OR.modenum/=0).AND.(.NOT.lqdir)) &
-                                           CALL write_rho( rho, nspin )
+                                           CALL write_scf( rho, nspin )
      ENDIF   
   ELSE  
      ! this is the standard treatment
      IF ( ( ( ldisp.OR..NOT.lgamma .OR. modenum/=0 ) .AND. (.NOT.lqdir) ) &
-          .OR. newgrid .OR. always_run ) CALL write_rho( rho, nspin )
+          .OR. newgrid .OR. always_run ) CALL write_scf( rho, nspin )
   ENDIF
 !!!!!!!!!!!!!!!!!!!!!!!! END OF ACFDT TEST !!!!!!!!!!!!!!!!
   !
@@ -271,7 +271,8 @@ SUBROUTINE check_initial_status(auxdyn)
   !  it is not found in the running directory.
   !
   filename=TRIM(fildyn)//'0'
-  IF (ionode) THEN
+  ierr=0 
+  IF (ionode.and..NOT.elph_mat) THEN
      INQUIRE (FILE = TRIM(filename), EXIST = exst)
      ierr=0
      IF ((.NOT. exst .OR. .NOT. recover).AND.ldisp) THEN
@@ -314,7 +315,7 @@ SUBROUTINE check_initial_status(auxdyn)
         IF (.NOT. exst) THEN
            CALL create_directory( tmp_dir_phq )
            tmp_dir=tmp_dir_phq
-           CALL write_rho( rho, nspin )
+           CALL write_scf( rho, nspin )
            tmp_dir=tmp_dir_save
         ENDIF
      ENDIF
@@ -484,11 +485,13 @@ SUBROUTINE check_initial_status(auxdyn)
    !  directories and created by the diffent images in the phsave directory
    !  of the image 0
    !
-   USE io_files,  ONLY : tmp_dir, xmlpun_base, prefix
+   USE io_files,  ONLY : tmp_dir, prefix
    USE control_ph, ONLY : tmp_dir_ph
    USE save_ph,   ONLY : tmp_dir_save
-   USE disp,      ONLY : nqs
+   USE disp,      ONLY : nqs, lgamma_iq
    USE grid_irr_iq,  ONLY : comp_irr_iq, irr_iq
+   USE control_ph,  ONLY : ldisp, epsil, zue, zeu
+   USE klist,       ONLY : lgauss, ltetra
    USE el_phon,     ONLY : elph
    USE wrappers,  ONLY : f_copy
    USE mp,        ONLY : mp_barrier
@@ -538,6 +541,18 @@ SUBROUTINE check_initial_status(auxdyn)
             ENDIF
          ENDIF
       ENDDO
+      IF ((ldisp.AND..NOT. (lgauss .OR. ltetra)).OR.(epsil.OR.zeu.OR.zue)) THEN
+         IF (lgamma_iq(iq).AND.comp_irr_iq(0,iq).AND.ionode) THEN
+            file_input=TRIM( tmp_dir_ph ) // &
+                      TRIM( prefix ) // '.phsave/tensors.xml'
+
+            file_output=TRIM( tmp_dir_save ) // '/_ph0/' &
+                    // TRIM( prefix ) // '.phsave/tensors.xml'
+
+            INQUIRE (FILE = TRIM(file_input), EXIST = exst)
+            IF (exst) ios = f_copy(file_input, file_output)
+         ENDIF
+      ENDIF
    ENDDO
    RETURN
    END SUBROUTINE collect_grid_files

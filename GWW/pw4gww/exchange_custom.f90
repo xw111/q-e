@@ -91,7 +91,7 @@ MODULE exchange_custom
       INTEGER :: iorig, idest
       INTEGER,ALLOCATABLE :: z2proc_s(:),z2proc(:)
       INTEGER :: req, ierr
-#ifdef __MPI
+#if defined(__MPI)
       INTEGER :: istatus(MPI_STATUS_SIZE)
 #endif
       COMPLEX(kind=DP), ALLOCATABLE :: prods_g(:,:)
@@ -119,14 +119,14 @@ MODULE exchange_custom
       rz_end =0
       do ii=1,me_pool + 1
          rz_start=rz_end+1
-         rz_end=rz_end+exx_cus%fft_g2r%dfftt%npp(ii)
+         rz_end=rz_end+exx_cus%fft_g2r%dfftt%nr3p(ii)
       end do
 
       rz_start_s=0
       rz_end_s=0
       do ii=1,me_pool + 1
          rz_start_s=rz_end_s+1
-         rz_end_s=rz_end_s+exx_cus%fft_small%dfftt%npp(ii)
+         rz_end_s=rz_end_s+exx_cus%fft_small%dfftt%nr3p(ii)
       end do
       
       nr3small=rz_end_s-rz_start_s+1
@@ -140,7 +140,7 @@ MODULE exchange_custom
       k=0
       do ii=1,nproc
          j=k+1
-         k=k+exx_cus%fft_small%dfftt%npp(ii)
+         k=k+exx_cus%fft_small%dfftt%nr3p(ii)
          z2proc_s(j:k)=ii-1
       end do
 
@@ -148,7 +148,7 @@ MODULE exchange_custom
       k=0
       do ii=1,nproc
          j=k+1
-         k=k+exx_cus%fft_g2r%dfftt%npp(ii)
+         k=k+exx_cus%fft_g2r%dfftt%nr3p(ii)
          z2proc(j:k)=ii-1
       end do
 
@@ -240,7 +240,7 @@ MODULE exchange_custom
       enddo
 
       nr3small_max=nr3small
-#ifdef __MPI
+#if defined(__MPI)
       CALL MPI_ALLREDUCE( nr3small, nr3small_max,1,MPI_INTEGER, MPI_MAX,intra_pool_comm, req,IERR )           
 #endif
       
@@ -315,7 +315,7 @@ MODULE exchange_custom
                     enddo
                  enddo
 !send nplane
-#ifdef __MPI
+#if defined(__MPI)
                  idest=mod(me_pool+ip_delta,nproc)
                  CALL MPI_ISEND( nplane,1, MPI_INTEGER, idest, 0, intra_pool_comm, req,IERR ) 
                  CALL MPI_WAIT(req,istatus,ierr)
@@ -334,7 +334,7 @@ MODULE exchange_custom
               else
 !if I am receiver 
   !see if and what I have to receive
-#ifdef __MPI
+#if defined(__MPI)
                  iorig=me_pool-ip_delta
                  if(iorig<0) iorig=iorig+nproc
                  CALL MPI_RECV( nplane,1, MPI_INTEGER, iorig, 0, intra_pool_comm, istatus,IERR )
@@ -656,7 +656,7 @@ MODULE exchange_custom
                   enddo
                enddo
 !send nplane
-#ifdef __MPI
+#if defined(__MPI)
                idest=mod(me_pool+ip_delta,nproc)
                CALL MPI_ISEND( nplane,1, MPI_INTEGER, idest, 0, intra_pool_comm, req,IERR ) 
                CALL MPI_WAIT(req,istatus,ierr)
@@ -674,7 +674,7 @@ MODULE exchange_custom
             else
 !if I am receiver 
   !see if and what I have to receive
-#ifdef __MPI
+#if defined(__MPI)
                iorig=me_pool-ip_delta
                if(iorig<0) iorig=iorig+nproc
                CALL MPI_RECV( nplane,1, MPI_INTEGER, iorig, 0, intra_pool_comm, istatus,IERR )
@@ -821,7 +821,7 @@ MODULE exchange_custom
       INTEGER :: iorig, idest
       INTEGER,ALLOCATABLE :: z2proc_s(:),z2proc(:)
       INTEGER :: req, ierr
-#ifdef __MPI
+#if defined(__MPI)
       INTEGER :: istatus(MPI_STATUS_SIZE)
 #endif
       COMPLEX(kind=DP), ALLOCATABLE :: prods_g(:)
@@ -862,14 +862,14 @@ MODULE exchange_custom
       rz_end =0
       do ii=1,me_pool + 1
          rz_start=rz_end+1
-         rz_end=rz_end+exx_cus%fft_g2r%dfftt%npp(ii)
+         rz_end=rz_end+exx_cus%fft_g2r%dfftt%nr3p(ii)
       end do
 
       rz_start_s=0
       rz_end_s=0
       do ii=1,me_pool + 1
          rz_start_s=rz_end_s+1
-         rz_end_s=rz_end_s+fft_small%dfftt%npp(ii)
+         rz_end_s=rz_end_s+fft_small%dfftt%nr3p(ii)
       end do
 
       allocate(z2proc_s(fft_small%nr3t))
@@ -880,7 +880,7 @@ MODULE exchange_custom
       k=0
       do ii=1,nproc
          j=k+1
-         k=k+fft_small%dfftt%npp(ii)
+         k=k+fft_small%dfftt%nr3p(ii)
          z2proc_s(j:k)=ii-1
       end do
 
@@ -888,14 +888,14 @@ MODULE exchange_custom
       k=0
       do ii=1,nproc
          j=k+1
-         k=k+exx_cus%fft_g2r%dfftt%npp(ii)
+         k=k+exx_cus%fft_g2r%dfftt%nr3p(ii)
          z2proc(j:k)=ii-1
       end do
 
 
 
       r2s_xy(:)=0
-      do iz=1,exx_cus%fft_g2r%dfftt%npp(me_pool+1)
+      do iz=1,exx_cus%fft_g2r%dfftt%nr3p(me_pool+1)
          do iy=1,exx_cus%fft_g2r%nr2t
             do ix=1,exx_cus%fft_g2r%nr1t
                iqq=(iz-1)*(exx_cus%fft_g2r%nrx1t*exx_cus%fft_g2r%nrx2t)+(iy-1)*exx_cus%fft_g2r%nrx1t+ix
@@ -986,7 +986,7 @@ MODULE exchange_custom
                             & prods((iz_s-rz_start_s)*(fft_small%nrx1t*fft_small%nrx2t)+iqq_s)+planes(iqq_s)
                      enddo
                   else
-#ifdef __MPI
+#if defined(__MPI)
                      CALL MPI_ISEND( planes, fft_small%nrx1t*fft_small%nrx2t, MPI_DOUBLE_PRECISION, &
                           &idest, iz, intra_pool_comm, req,IERR )
                      CALL MPI_WAIT(req,istatus,ierr)
@@ -998,7 +998,7 @@ MODULE exchange_custom
             !if Z o  small cell is mine receive it
                   if(z2proc_s(iz_s)==me_pool) then
                      iorig=z2proc(iz)
-#ifdef __MPI
+#if defined(__MPI)
                      CALL MPI_RECV( planes, fft_small%nrx1t*fft_small%nrx2t, MPI_DOUBLE_PRECISION, &
                           &iorig, iz, intra_pool_comm, istatus, IERR )
 #endif
@@ -1058,7 +1058,7 @@ MODULE exchange_custom
                         do iqq_s=1,fft_small%nrx1t*fft_small%nrx2t
                            planes(iqq_s)=prods((iz_s-rz_start_s)*(fft_small%nrx1t*fft_small%nrx2t)+iqq_s)
                         enddo
-#ifdef __MPI
+#if defined(__MPI)
                         CALL MPI_ISEND( planes, fft_small%nrx1t*fft_small%nrx2t, MPI_DOUBLE_PRECISION, &
                              &idest, iz, intra_pool_comm, req,IERR )
                         CALL MPI_WAIT(req,istatus,ierr)
@@ -1069,7 +1069,7 @@ MODULE exchange_custom
                      !if Z on  large cell is mine receive it 
                      if(z2proc(iz)==me_pool) then
                         iorig=z2proc_s(iz_s)
-#ifdef __MPI
+#if defined(__MPI)
                         CALL MPI_RECV( planes, fft_small%nrx1t*fft_small%nrx2t, MPI_DOUBLE_PRECISION, &
                              &iorig, iz, intra_pool_comm, istatus, IERR )
 #endif
@@ -1128,7 +1128,8 @@ MODULE exchange_custom
 
 
       USE io_global,  ONLY : stdout, ionode, ionode_id
-      USE wvfct,    ONLY : igk, g2kin, npwx, npw, nbnd, nbndx, ecutwfc
+      USE wvfct,    ONLY : npwx, npw, nbnd
+      USE gvecw, ONLY : ecutwfc
       USE cell_base, ONLY: at, alat, tpiba, omega, tpiba2,bg
       USE constants, ONLY : e2, pi, tpi, fpi, RYTOEV
       USE wavefunctions_module, ONLY : psic
@@ -1159,7 +1160,7 @@ MODULE exchange_custom
       INTEGER iplane
       REAL(kind=DP), ALLOCATABLE :: plane(:)
       INTEGER :: req, ierr
-#ifdef __MPI
+#if defined(__MPI)
       INTEGER :: istatus(MPI_STATUS_SIZE)
 #endif
 
@@ -1220,13 +1221,13 @@ MODULE exchange_custom
          rz_end =0
          do ii=1,me_pool + 1
             rz_start=rz_end+1
-            rz_end=rz_end+exx_cus%fft_g2r%dfftt%npp(ii)
+            rz_end=rz_end+exx_cus%fft_g2r%dfftt%nr3p(ii)
          end do
 
          exx_cus%r2s_xy(:,:,:)=0
          do i=1,exx_cus%n(1)
             do j=1,exx_cus%n(2)
-               do iz=1,exx_cus%fft_g2r%dfftt%npp(me_pool+1)
+               do iz=1,exx_cus%fft_g2r%dfftt%my_nr3p
                   do iy=1,exx_cus%fft_g2r%nr2t
                      do ix=1,exx_cus%fft_g2r%nr1t
                         iqq=(iz-1)*(exx_cus%fft_g2r%nrx1t*exx_cus%fft_g2r%nrx2t)+(iy-1)*exx_cus%fft_g2r%nrx1t+ix
@@ -1319,14 +1320,14 @@ MODULE exchange_custom
          rz_end =0
          do ii=1,me_pool + 1
             rz_start=rz_end+1
-            rz_end=rz_end+exx_cus%fft_g2r%dfftt%npp(ii)
+            rz_end=rz_end+exx_cus%fft_g2r%dfftt%nr3p(ii)
          end do
          
          rz_start_s=0
          rz_end_s=0
          do ii=1,me_pool + 1
             rz_start_s=rz_end_s+1
-            rz_end_s=rz_end_s+exx_cus%fft_small%dfftt%npp(ii)
+            rz_end_s=rz_end_s+exx_cus%fft_small%dfftt%nr3p(ii)
          end do
          nr3small=rz_end_s-rz_start_s+1
          allocate(exx_cus%wfc_red(exx_cus%fft_g2r%nrx1t*exx_cus%fft_g2r%nrx2t,nr3small,exx_cus%m(3),num_nbndv_max,exx_cus%nspin))
@@ -1338,7 +1339,7 @@ MODULE exchange_custom
          k=0
          do ii=1,nproc
             j=k+1
-            k=k+exx_cus%fft_small%dfftt%npp(ii)
+            k=k+exx_cus%fft_small%dfftt%nr3p(ii)
             z2proc_s(j:k)=ii-1
          end do
          
@@ -1346,7 +1347,7 @@ MODULE exchange_custom
          k=0
          do ii=1,nproc
             j=k+1
-            k=k+exx_cus%fft_g2r%dfftt%npp(ii)
+            k=k+exx_cus%fft_g2r%dfftt%nr3p(ii)
             z2proc(j:k)=ii-1
          end do
 
@@ -1376,7 +1377,7 @@ MODULE exchange_custom
                          do iqq=1,exx_cus%fft_g2r%nrx1t*exx_cus%fft_g2r%nrx2t
                             plane(iqq)=exx_cus%wfc((iz-rz_start)*(exx_cus%fft_g2r%nrx1t*exx_cus%fft_g2r%nrx2t)+iqq,jv,is)
                          enddo
-#ifdef __MPI
+#if defined(__MPI)
                          CALL MPI_ISEND( plane,exx_cus%fft_g2r%nrx1t*exx_cus%fft_g2r%nrx2t, MPI_DOUBLE_PRECISION, &
                               &idest, iz, intra_pool_comm, req,IERR )
                          CALL MPI_WAIT(req,istatus,ierr)
@@ -1393,7 +1394,7 @@ MODULE exchange_custom
                   iorig=z2proc(iz)
                   do is=1,exx_cus%nspin
                      do jv=1,exx_cus%nbndv(is)
-#ifdef __MPI
+#if defined(__MPI)
                         CALL MPI_RECV( plane, exx_cus%fft_g2r%nrx1t*exx_cus%fft_g2r%nrx2t, MPI_DOUBLE_PRECISION, &
                              &iorig, iz, intra_pool_comm, istatus, IERR )
 #endif
@@ -1464,7 +1465,7 @@ MODULE exchange_custom
 !apply Fock operator to a wavefunction
 
       USE io_global, ONLY : stdout, ionode, ionode_id
-      USE wvfct,     ONLY : igk, g2kin, npwx, npw, nbnd, nbndx, ecutwfc
+      USE wvfct,     ONLY : npwx, npw, nbnd
       USE cell_base, ONLY: at, alat, tpiba, omega, tpiba2,bg
       USE constants, ONLY : e2, pi, tpi, fpi, RYTOEV
       USE wavefunctions_module, ONLY : psic
@@ -1656,7 +1657,7 @@ MODULE exchange_custom
 
     FUNCTION exchange_energy_fast(exx_cus,exxalpha)
 
-      USE wvfct,    ONLY : igk, g2kin, npwx, npw, nbnd, nbndx, ecutwfc
+      USE wvfct,    ONLY : npwx, npw, nbnd
       USE wavefunctions_module, ONLY : evc
       USE mp, ONLY : mp_sum
       USE mp_world, ONLY : world_comm
@@ -1706,7 +1707,7 @@ MODULE exchange_custom
 
     subroutine dft_exchange_fast(ispin,nbnd_s,psi,exx_cus)
       USE io_global,            ONLY : stdout, ionode, ionode_id
-      USE wvfct,    ONLY : igk, g2kin, npwx, npw, nbnd, nbndx, ecutwfc,wg
+      USE wvfct,    ONLY : npwx, npw, nbnd, wg
       USE gvect
       USE mp, ONLY : mp_sum
       USE mp_world, ONLY : world_comm

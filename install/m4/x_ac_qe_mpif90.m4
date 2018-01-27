@@ -15,23 +15,15 @@ AC_ARG_ENABLE(parallel,
    
 # candidate fortran compilers good for all cases
 try_mpif90="mpif90"
-try_f90="gfortran g95 f90"
+try_f90="gfortran f90"
 
 # candidate compilers and flags based on architecture
 case $arch in
 ia32 | ia64 | x86_64 )
-        try_f90="ifort pgf90 pathf95 sunf95 openf95 nagfor $try_f90"
+        try_f90="ifort pgf90 nagfor $try_f90"
         ;;
 arm )
         try_f90="$try_f90"
-        ;;
-solaris )
-        try_f90="sunf95 $try_f90"
-        ;;
-aix )
-        try_mpif90="mpxlf90_r mpxlf90"
-        try_f90="xlf90_r xlf90 $try_f90"
-        try_dflags="-D__AIX -D__XLF"
         ;;
 crayxt* )
         try_f90="ftn"
@@ -46,6 +38,7 @@ mingw* )
         try_dflags="-D_WIN32"
         ;;
 necsx )
+        # most likely the following generates a bug
         sxopt=`echo $host|awk '{print substr($1,1,3)}'`
         echo $sxopt $host
         try_mpif90="sxmpif90"
@@ -132,82 +125,39 @@ case "$arch" in
         ia32 | ia64 | x86_64 | mac686 )
         echo $ECHO_N "checking version of $mpif90... $ECHO_C"
         ifort_version=`$mpif90 -V 2>&1 | grep "Intel(R)"`
-        sunf95_version=`$mpif90 -V 2>&1 | grep "Sun Fortran"`
-        openf95_version=`$mpif90 -V 2>&1 | grep "^Open64"`
         pgf_version=`$mpif90 -V 2>&1 | grep "^pgf"`
-        g95_version=`$mpif90 -v 2>&1 | grep "g95"`
-        enzo_version=`$mpif90 -v 2>&1 | grep "PathScale ENZO"`
-        eko_version=`$mpif90 -v 2>&1 | grep "PathScale EKOPath"`
-        pathf95_version=`$mpif90 -v 2>&1 | grep "PathScale"`
         gfortran_version=`$mpif90 -v 2>&1 | grep "gcc version"`
         nagfor_version=`$mpif90 -v 2>&1 | grep "NAG Fortran"`
         #
         if test "$ifort_version" != ""
         then
-                version=`$mpif90 -V 2>&1 | grep Version |
-                         sed 's/.*Version//' | awk '{print $1}'`
-                ifort_version=`echo $version | sed 's/\..*//'`
-                echo "${ECHO_T}ifort $version"
+                version=`$mpif90 --version 2>&1 | grep "IFORT" | cut -d ' ' -f3`
+                f90_major_version=`echo $version | cut -d. -f1`
+                echo "${ECHO_T}ifort $f90_major_version"
                 f90_in_mpif90="ifort"
-                if test "$ifort_version" -gt 8; then
-                # flags for MKL - ifort 9 and later
-                   MKL_LIBS=""
-                   if test "$ifort_version" -gt 9; then
-                        MKL_FLAGS="-static-intel"
-                   else
-                        MKL_FLAGS="-i-static"
-                   fi
-                else
-                # flags for MKL - ifort 8 and earlier, obsolescent
-                   MKL_LIBS="-lguide -lpthread"
-                   MKL_FLAGS=""
+                # Why so?
+                if test "$f90_major_version" -gt "9"; then
+                   MKL_FLAGS="-static-intel"
                 fi
-        elif test "$sunf95_version" != ""
-        then
-                version=`echo $sunf95_version | awk '{print $5}'`
-                echo "${ECHO_T}sunf95 $version"
-                f90_in_mpif90="sunf95"
-        elif test "$openf95_version" != ""
-        then
-                version=`echo $openf95_version | awk '{print $5}'`
-                echo "${ECHO_T}openf95 $version"
-                f90_in_mpif90="openf95"
+
         elif test "$pgf_version" != ""
         then
-                version=`echo $pgf_version | awk '{print $2}'`
+                version=`echo $pgf_version | cut -d ' ' -f2`
                 echo "${ECHO_T}pgf90 $version"
                 f90_in_mpif90="pgf90"
                 # flag to test MKL with PGI
                 MKL_FLAGS="-pgf90libs"
-        elif test "$enzo_version" != ""
-        then
-                version=`echo $enzo_version | awk '{print $6}'`
-                echo "${ECHO_T}pathf95 $version"
-                f90_in_mpif90="pathf95"
-        elif test "$eko_version" != ""
-        then
-                version=`echo $eko_version | awk '{print $6}'`
-                echo "${ECHO_T}pathf95 $version"
-                f90_in_mpif90="pathf95"
-        elif test "$g95_version" != ""
-        then
-                version=`echo $g95_version | awk '{print $3}'`
-                echo "${ECHO_T}g95 $version"
-                f90_in_mpif90="g95"
-        elif test "$pathf95_version" != ""
-        then
-                version=`echo $pathf95_version | awk '{print $5}'`
-                echo "${ECHO_T}pathf95 $version"
-                f90_in_mpif90="pathf95"
         elif test "$gfortran_version" != ""
         then
-                version=`echo $gfortran_version | awk '{print $3}'`
-                echo "${ECHO_T}gfortran $version"
+                version=`echo $gfortran_version | cut -d ' ' -f3`
+                f90_major_version=`echo $version | cut -d. -f1`
+                f90_minor_version=`echo $version | cut -d. -f2`
+                echo "${ECHO_T}gfortran $f90_major_version.$f90_minor_version"
                 f90_in_mpif90="gfortran"
         elif test "$nagfor_version" != ""
         then
                 # NAG 6.0 has the codename attached to version number... annoying
-                version=`echo $nagfor_version | awk '{print $5}'`
+                version=`echo $nagfor_version | cut -d ' ' -f5`
                 echo "${ECHO_T}nagfor $version"
                 f90_in_mpif90="nagfor"
         else
@@ -231,35 +181,23 @@ f90 | fc | ftn )
     echo $ECHO_N "checking version wrapped by $f90 command... $ECHO_C"
 
     if $f90 -V 2>&1 | grep -q "Intel(R)" ; then
-        f90_version=ifort
-    elif $f90 -V 2>&1 | grep -q "Sun Fortran" ; then
-        f90_version=sunf95
-    elif $f90 -V 2>&1 | grep -q "^Open64" ; then
-        f90_version=openf95
+        f90_flavor=ifort
     elif $f90 -V 2>&1 | grep -q "^pgf" ; then
-        f90_version=pgf
-    elif $f90 -v 2>&1 | grep -q "PathScale ENZO" ; then
-        f90_version=pathf95
-    elif $f90 -v 2>&1 | grep -q "PathScale EKOPath" ; then
-        f90_version=pathf95
-    elif $f90 -version 2>&1 | grep -q "PathScale" ; then
-        f90_version=pathf95
-    elif $f90 -v 2>&1 | grep -q "g95" ; then
-        f90_version=g95
+        f90_flavor=pgf
     elif $f90 -v 2>&1 | grep -q "gcc version" ; then
-        f90_version=gfortran
+        f90_flavor=gfortran
     elif $f90 -V 2>&1 | grep -q "Cray Fortran" ; then
-        f90_version=crayftn
+        f90_flavor=crayftn
     elif $f90 -version 2>&1 | grep -q "NAG Fortran" ; then
-        f90_version=nagfor
+        f90_flavor=nagfor
     else
         echo $ECHO_N "unknown, leaving as... $ECHO_C"
-        f90_version=$f90
+        f90_flavor=$f90
     fi
-    echo $f90_version
+    echo $f90_flavor
     ;;
 * )
-    f90_version=$f90
+    f90_flavor=$f90
     ;;
 esac
 

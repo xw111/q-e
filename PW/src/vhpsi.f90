@@ -96,7 +96,6 @@ subroutine vhpsi_nc (ldap, np, mps, psip, hpsi)
   USE scf,              ONLY : v
   USE ions_base,        ONLY : nat, ntyp => nsp, ityp
   USE noncollin_module, ONLY : npol
-  USE wvfct,            ONLY : npwx
   USE mp_bands,         ONLY : intra_bgrp_comm
   USE mp,               ONLY : mp_sum
   !
@@ -120,7 +119,7 @@ subroutine vhpsi_nc (ldap, np, mps, psip, hpsi)
       proj(na, ibnd) = zdotc (ldap*npol, wfcU(1, na), 1, psip(1, ibnd), 1)
     ENDDO
   ENDDO
-#ifdef __MPI
+#if defined(__MPI)
   CALL mp_sum ( proj, intra_bgrp_comm )
 #endif
 !--

@@ -1,5 +1,5 @@
 !
-! Copyright (C) 2001-2009 Quantum ESPRESSO group
+! Copyright (C) 2001-2016 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -14,28 +14,31 @@ subroutine dvpsi_e (ik, ipol)
   !            (projected on at(*,ipol) )
   !
   ! dvpsi is READ from file if this_pcxpsi_is_on_file(ik,ipol)=.true.
-  ! otherwise dvpsi is COMPUTED and WRITTEN on file (vkb,evc,igk must be set)
+  ! otherwise dvpsi is COMPUTED and WRITTEN on file (vkb and evc must be set)
   !
   USE kinds,           ONLY : DP
   USE cell_base,       ONLY : tpiba2
   USE io_global,       ONLY : stdout
-  USE klist,           ONLY : xk
+  USE klist,           ONLY : xk, ngk, igk_k
   USE gvect,           ONLY : g
-  USE wvfct,           ONLY : npw, npwx, nbnd, igk, g2kin, et
+  USE wvfct,           ONLY : npwx, nbnd, g2kin, et
   USE wavefunctions_module, ONLY: evc
   USE buffers,         ONLY : save_buffer, get_buffer
   USE noncollin_module,ONLY : noncolin, npol
   USE becmod,          ONLY : bec_type, becp, calbec, &
                               allocate_bec_type, deallocate_bec_type
+  USE mp_bands,        ONLY : use_bgrp_in_hpsi, set_bgrp_indices
+  USE funct,           ONLY : exx_is_active
   USE uspp,            ONLY : okvan, nkb, vkb
   USE uspp_param,      ONLY : nh, nhm
   USE ramanm,          ONLY : eth_rps
-  USE eqv,             ONLY : dpsi, dvpsi, eprec
-  USE phus,            ONLY : becp1
-  USE qpoint,          ONLY : nksq, npwq
   USE units_ph,        ONLY : this_pcxpsi_is_on_file, lrcom, iucom, &
                               lrebar, iuebar
-  USE control_ph,      ONLY : nbnd_occ
+
+  USE lrus,            ONLY : becp1
+  USE qpoint,          ONLY : nksq
+  USE eqv,             ONLY : dpsi, dvpsi
+  USE control_lr,      ONLY : nbnd_occ
 
   implicit none
   !
@@ -43,6 +46,7 @@ subroutine dvpsi_e (ik, ipol)
   !
   ! Local variables
   !
+  integer :: npw
   integer :: ig, na, ibnd, jbnd, ikb, jkb, nt, lter, ih, jh, ijkb0,  &
              nrec, is, js, ijs
   ! counters
@@ -56,6 +60,7 @@ subroutine dvpsi_e (ik, ipol)
   ! the desired convergence of linter
   logical :: conv_root
   ! true if convergence has been achieved
+  INTEGER :: n_start, n_end
 
   external ch_psi_all, cg_psi
   !
@@ -79,28 +84,19 @@ subroutine dvpsi_e (ik, ipol)
   !    Apply -P^+_c
   !    NB it uses dvpsi as workspace
   !
-  CALL orthogonalize(dpsi, evc, ik, ik, dvpsi, npwq)
+  npw = ngk(ik)
+  CALL orthogonalize(dpsi, evc, ik, ik, dvpsi, npw, .false.)
   dpsi=-dpsi
   !
   !   dpsi contains P^+_c [H-eS,x] psi_v for the three crystal polarizations
   !   Now solve the linear systems (H-e_vS)*P_c(x*psi_v)=P_c^+ [H-e_vS,x]*psi_v
   !
-
-  do ig = 1, npw
-     g2kin (ig) = SUM((xk(1:3,ik) +g (1:3, igk (ig)) ) **2) *tpiba2
-  enddo
+  CALL g2_kin(ik)
+  !
+  ! compute preconditioning matrix h_diag used by cgsolve_all
+  !
   allocate (h_diag( npwx*npol, nbnd))
-  h_diag=0.d0
-  do ibnd = 1, nbnd_occ (ik)
-     do ig = 1, npw
-        h_diag (ig, ibnd) = 1.d0 / max (1.0d0, g2kin (ig) / eprec (ibnd,ik) )
-     enddo
-     IF (noncolin) THEN
-        do ig = 1, npw
-           h_diag (ig+npwx, ibnd) = 1.d0/max(1.0d0,g2kin(ig)/eprec(ibnd,ik))
-        enddo
-     END IF
-  enddo
+  CALL h_prec (ik, evc, h_diag)
   !
   dvpsi(:,:) = (0.d0, 0.d0)
   !
@@ -132,7 +128,12 @@ subroutine dvpsi_e (ik, ipol)
      call save_buffer(dvpsi, lrcom, iucom, nrec)
      !
      allocate (spsi ( npwx*npol, nbnd))
-     CALL calbec (npw, vkb, dvpsi, becp )
+     if (use_bgrp_in_hpsi .AND. .NOT. exx_is_active() .and. nbnd>1 ) then
+        call set_bgrp_indices(nbnd,n_start,n_end)
+        if (n_end >= n_start) CALL calbec (npw, vkb, dvpsi(:,n_start:n_end), becp , n_end-n_start+1 )
+     else
+        CALL calbec (npw, vkb, dvpsi, becp )
+     end if
      CALL s_psi(npwx,npw,nbnd,dvpsi,spsi)
      call dcopy(2*npwx*npol*nbnd,spsi,1,dvpsi,1)
      deallocate (spsi)

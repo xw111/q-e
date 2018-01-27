@@ -12,15 +12,15 @@ SUBROUTINE sym_band(filband, spin_component, firstk, lastk)
   !
   USE kinds,                ONLY : DP
   USE ions_base,            ONLY : nat, ityp, ntyp => nsp
-  USE cell_base,            ONLY : tpiba2, at, bg, ibrav
+  USE cell_base,            ONLY : at, bg, ibrav
   USE constants,            ONLY : rytoev
   USE fft_base,             ONLY : dfftp
   USE gvect,                ONLY : ngm, nl, g
   USE lsda_mod,             ONLY : nspin
-  USE wvfct,                ONLY : et, nbnd, npwx, npw, igk, g2kin, ecutwfc
-  USE klist,                ONLY : xk, nks, nkstot
+  USE wvfct,                ONLY : et, nbnd, npwx
+  USE klist,                ONLY : xk, nks, nkstot, ngk, igk_k
   USE io_files,             ONLY : nwordwfc, iunwfc
-  USE symm_base,            ONLY : s, ftau, nsym, t_rev, sname
+  USE symm_base,            ONLY : s, ftau, nsym, t_rev, invs, sname
   USE rap_point_group,      ONLY : code_group, nclass, nelem, elem, which_irr, &
        char_mat, name_rap, name_class, gname, ir_ram
   USE rap_point_group_so,   ONLY : nrap, nelem_so, elem_so, has_e, &
@@ -39,11 +39,11 @@ SUBROUTINE sym_band(filband, spin_component, firstk, lastk)
   IMPLICIT NONE
   !
   INTEGER :: ik, i, j, irot, iclass, ig, ibnd
-  INTEGER :: spin_component, nks1, nks2, firstk, lastk
+  INTEGER :: npw, spin_component, nks1, nks2, firstk, lastk
   INTEGER :: nks1tot, nks2tot
   INTEGER :: iunout, igroup, irap, dim_rap, ios
   INTEGER :: sk(3,3,48), ftauk(3,48), gk(3,48), sk_is(3,3,48), &
-       gk_is(3,48), t_revk(48), nsymk, isym, ipol, jpol
+       gk_is(3,48), invs_is(48), t_revk(48), invsk(48), nsymk, isym, ipol, jpol
   LOGICAL :: is_complex, is_complex_so, is_symmorphic, search_sym
   LOGICAL, ALLOCATABLE :: high_symmetry(:)
   REAL(DP), PARAMETER :: accuracy=1.d-4
@@ -87,12 +87,8 @@ SUBROUTINE sym_band(filband, spin_component, firstk, lastk)
 
   DO ik = nks1, nks2
      !
-     !    prepare the indices of this k point
-     !
-     CALL gk_sort (xk (1, ik), ngm, g, ecutwfc / tpiba2, npw, &
-          igk, g2kin)
-     !
-     CALL init_us_2 (npw, igk, xk (1, ik), vkb)
+     npw = ngk(ik)
+     CALL init_us_2 (npw, igk_k(1,ik), xk (1, ik), vkb)
      !
      !   read eigenfunctions
      !
@@ -100,14 +96,13 @@ SUBROUTINE sym_band(filband, spin_component, firstk, lastk)
      !
      ! Find the small group of k
      !
-     CALL smallgk (xk(1,ik), at, bg, s, ftau, t_rev, sname, nsym, sk, ftauk, &
-          gk, t_revk, snamek, nsymk)
+     CALL smallgk (xk(1,ik), at, bg, s, ftau, t_rev, sname, nsym, sk, &
+          ftauk, gk, t_revk, invsk, snamek, nsymk)
      !
      !  character of the irreducible representations
      !
      CALL find_info_group(nsymk,sk,t_revk,ftauk,d_spink,gk,snamek,&
-          sk_is,d_spin_is,gk_is, &
-          is_symmorphic,search_sym)
+          sk_is,d_spin_is,gk_is,invs_is,is_symmorphic,search_sym)
      code_group_k(ik)=code_group
      !
      IF (.not.search_sym) THEN
@@ -119,17 +114,17 @@ SUBROUTINE sym_band(filband, spin_component, firstk, lastk)
      !
      IF (noncolin) THEN
         IF (domag) THEN
-           CALL find_band_sym_so(evc,et(1,ik),nsym_is, &
-                sk_is,ftau_is,d_spin_is,gk_is,&
+           CALL find_band_sym_so(ik,evc,et(1,ik),nsym_is, &
+                sk_is,ftau_is,d_spin_is,gk_is,invs_is,&
                 rap_et(1,ik),times(1,1,ik), &
                 ngroup(ik),istart(1,ik),accuracy)
         ELSE
-           CALL find_band_sym_so(evc,et(1,ik),nsymk,sk,ftauk,d_spink,&
-                gk,rap_et(1,ik),times(1,1,ik),ngroup(ik),&
+           CALL find_band_sym_so(ik,evc,et(1,ik),nsymk,sk,ftauk,d_spink,&
+                gk,invsk,rap_et(1,ik),times(1,1,ik),ngroup(ik),&
                 istart(1,ik),accuracy)
         ENDIF
      ELSE
-        CALL find_band_sym (evc, et(1,ik), nsymk, sk, ftauk, gk, &
+        CALL find_band_sym (ik,evc, et(1,ik), nsymk, sk, ftauk, gk, invsk, &
              rap_et(1,ik), times(1,1,ik), ngroup(ik),&
              istart(1,ik),accuracy)
      ENDIF
@@ -172,10 +167,9 @@ SUBROUTINE sym_band(filband, spin_component, firstk, lastk)
 !
      DO ik=nks1tot, nks2tot
         CALL smallgk (xk(1,ik), at, bg, s, ftau, t_rev, sname, &
-             nsym, sk, ftauk, gk, t_revk, snamek, nsymk)
+             nsym, sk, ftauk, gk, t_revk, invsk, snamek, nsymk)
         CALL find_info_group(nsymk,sk,t_revk,ftauk,d_spink,gk,snamek,&
-             sk_is,d_spin_is,gk_is, &
-             is_symmorphic,search_sym)
+             sk_is,d_spin_is,gk_is,invs_is,is_symmorphic,search_sym)
         IF (code_group_k(ik) /= code_group) &
              CALL errore('sym_band','problem with code_group',1)
         WRITE(stdout, '(/,1x,74("*"))')
@@ -315,7 +309,7 @@ SUBROUTINE sym_band(filband, spin_component, firstk, lastk)
   RETURN
 END SUBROUTINE sym_band
 !
-SUBROUTINE find_band_sym (evc,et,nsym,s,ftau,gk,rap_et,times,ngroup,&
+SUBROUTINE find_band_sym (ik,evc,et,nsym,s,ftau,gk,invs,rap_et,times,ngroup,&
                           istart,accuracy)
   !
   !   This subroutine finds the irreducible representations which give
@@ -330,7 +324,8 @@ SUBROUTINE find_band_sym (evc,et,nsym,s,ftau,gk,rap_et,times,ngroup,&
   USE rap_point_group, ONLY : code_group, nclass, nelem, elem, which_irr, &
        char_mat, name_rap, name_class, gname
   USE gvect,           ONLY : ngm, nl
-  USE wvfct,           ONLY : nbnd, npwx, npw, igk
+  USE wvfct,           ONLY : nbnd, npwx
+  USE klist,           ONLY : ngk, igk_k
   USE uspp,            ONLY : vkb, nkb, okvan
   USE becmod,          ONLY : bec_type, becp, calbec, &
        allocate_bec_type, deallocate_bec_type
@@ -341,6 +336,7 @@ SUBROUTINE find_band_sym (evc,et,nsym,s,ftau,gk,rap_et,times,ngroup,&
 
   IMPLICIT NONE
 
+  INTEGER, INTENT(in) :: ik
   REAL(DP), INTENT(in) :: accuracy
 
   INTEGER ::                  &
@@ -349,6 +345,7 @@ SUBROUTINE find_band_sym (evc,et,nsym,s,ftau,gk,rap_et,times,ngroup,&
        ftau(3,48),       &
        gk(3,48),         &
        s(3,3,48),        &
+       invs(48),         &
        ngroup,           &  ! number of different frequencies groups
        istart(nbnd+1)
 
@@ -369,7 +366,7 @@ SUBROUTINE find_band_sym (evc,et,nsym,s,ftau,gk,rap_et,times,ngroup,&
        irap,      &
        iclass,    &
        shift,     &
-       na, i, j, ig, dimen, nrxx
+       na, i, j, ig, dimen, nrxx, npw
 
   COMPLEX(DP) :: zdotc
 
@@ -400,9 +397,10 @@ SUBROUTINE find_band_sym (evc,et,nsym,s,ftau,gk,rap_et,times,ngroup,&
 !
 !   bring all the bands in real space
 !
+  npw = ngk(ik)
   psic=(0.0_DP,0.0_DP)
   DO ibnd=1,nbnd
-     psic(nl(igk(1:npw)),ibnd) = evc(1:npw,ibnd)
+     psic(nl(igk_k(1:npw,ik)),ibnd) = evc(1:npw,ibnd)
      CALL invfft ('Dense', psic(:,ibnd), dfftp)
   ENDDO
   !
@@ -419,7 +417,8 @@ SUBROUTINE find_band_sym (evc,et,nsym,s,ftau,gk,rap_et,times,ngroup,&
      IF (irot==1) THEN
         evcr=evc
      ELSE
-        CALL rotate_all_psi(psic,evcr,s(1,1,irot),ftau(1,irot),gk(1,irot))
+        CALL rotate_all_psi(ik,psic,evcr,s(1,1,invs(irot)), &
+                               ftau(1,invs(irot)),gk(1,invs(irot)))
      ENDIF
      !
      !   and apply S if necessary
@@ -463,7 +462,7 @@ SUBROUTINE find_band_sym (evc,et,nsym,s,ftau,gk,rap_et,times,ngroup,&
         times(igroup,irap)=(0.d0,0.d0)
         DO iclass=1,nclass
            times(igroup,irap)=times(igroup,irap) &
-                +trace(iclass,igroup)*char_mat(irap,which_irr(iclass))&
+                +trace(iclass,igroup)*CONJG(char_mat(irap,which_irr(iclass)))&
                 *nelem(iclass)
         ENDDO
         times(igroup,irap)=times(igroup,irap)/nsym
@@ -517,12 +516,13 @@ SUBROUTINE find_band_sym (evc,et,nsym,s,ftau,gk,rap_et,times,ngroup,&
 END SUBROUTINE find_band_sym
 
 
-SUBROUTINE rotate_all_psi(psic,evcr,s,ftau,gk)
+SUBROUTINE rotate_all_psi(ik,psic,evcr,s,ftau,gk)
 
   USE kinds,     ONLY : DP
   USE constants, ONLY : tpi
   USE gvect,     ONLY : ngm, nl
-  USE wvfct,     ONLY : nbnd, npwx, npw, igk
+  USE wvfct,     ONLY : nbnd, npwx
+  USE klist,     ONLY : ngk, igk_k
   USE fft_base,  ONLY : dfftp
   USE scatter_mod,  ONLY : cgather_sym_many, cscatter_sym_many
   USE fft_interfaces, ONLY : fwfft, invfft
@@ -531,6 +531,7 @@ SUBROUTINE rotate_all_psi(psic,evcr,s,ftau,gk)
 
   IMPLICIT NONE
 
+  INTEGER, INTENT(IN) :: ik
   INTEGER :: s(3,3), ftau(3), gk(3)
 
   COMPLEX(DP), ALLOCATABLE :: psir(:)
@@ -538,7 +539,7 @@ SUBROUTINE rotate_all_psi(psic,evcr,s,ftau,gk)
   COMPLEX(DP) :: phase
   REAL(DP) :: arg
   INTEGER :: i, j, k, ri, rj, rk, ir, rir, ipol, ibnd
-  INTEGER :: nr1, nr2, nr3, nr1x, nr2x, nr3x, nrxx
+  INTEGER :: nr1, nr2, nr3, nr1x, nr2x, nr3x, nrxx, npw
   LOGICAL :: zone_border
   INTEGER :: start_band, last_band, my_nbnd_proc
   INTEGER :: start_band_proc(dfftp%nproc), nbnd_proc(dfftp%nproc)
@@ -557,6 +558,7 @@ SUBROUTINE rotate_all_psi(psic,evcr,s,ftau,gk)
   nr2x=dfftp%nr2x
   nr3x=dfftp%nr3x
   nrxx=dfftp%nnr
+  npw = ngk(ik)
   !
   ALLOCATE(psir(nrxx))
   !
@@ -618,7 +620,7 @@ SUBROUTINE rotate_all_psi(psic,evcr,s,ftau,gk)
      !
      CALL fwfft ('Dense', psir, dfftp)
      !
-     evcr(1:npw,ibnd) = psir(nl(igk(1:npw)))
+     evcr(1:npw,ibnd) = psir(nl(igk_k(1:npw,ik)))
   END DO
   DEALLOCATE (psic_collect)
   DEALLOCATE (psir_collect)
@@ -654,7 +656,7 @@ SUBROUTINE rotate_all_psi(psic,evcr,s,ftau,gk)
      ENDIF
      CALL fwfft ('Dense', psir, dfftp)
      !
-     evcr(1:npw,ibnd) = psir(nl(igk(1:npw)))
+     evcr(1:npw,ibnd) = psir(nl(igk_k(1:npw,ik)))
   ENDDO
   !
 #endif
@@ -664,8 +666,8 @@ SUBROUTINE rotate_all_psi(psic,evcr,s,ftau,gk)
   RETURN
 END SUBROUTINE rotate_all_psi
 
-SUBROUTINE find_band_sym_so (evc,et,nsym,s,ftau,d_spin,gk, &
-     rap_et,times,ngroup,istart,accuracy)
+SUBROUTINE find_band_sym_so (ik,evc,et,nsym,s,ftau,d_spin,gk, &
+     invs,rap_et,times,ngroup,istart,accuracy)
 
   !
   !   This subroutine finds the irreducible representations of the
@@ -684,7 +686,8 @@ SUBROUTINE find_band_sym_so (evc,et,nsym,s,ftau,d_spin,gk, &
        name_class_so1
   USE rap_point_group_is, ONLY : gname_is
   USE gvect,              ONLY : ngm, nl
-  USE wvfct,              ONLY : nbnd, npwx, npw, igk
+  USE wvfct,              ONLY : nbnd, npwx
+  USE klist,              ONLY : ngk
   USE spin_orb,           ONLY : domag
   USE uspp,               ONLY : vkb, nkb, okvan
   USE noncollin_module,   ONLY : npol
@@ -694,6 +697,7 @@ SUBROUTINE find_band_sym_so (evc,et,nsym,s,ftau,d_spin,gk, &
 
   IMPLICIT NONE
 
+  INTEGER, INTENT(in) :: ik
   REAL(DP), INTENT(in) :: accuracy
 
   INTEGER ::                  &
@@ -703,6 +707,7 @@ SUBROUTINE find_band_sym_so (evc,et,nsym,s,ftau,d_spin,gk, &
        rap_et(nbnd),     &
        ftau(3,48),       &
        gk(3,48),         &
+       invs(48),         &
        s(3,3,48)
 
   REAL(DP) ::                 &
@@ -723,7 +728,7 @@ SUBROUTINE find_band_sym_so (evc,et,nsym,s,ftau,d_spin,gk, &
        irap,      &
        shift,     &
        iclass,    &
-       na, i, j, ig, ipol, jpol, jrap, dimen
+       na, i, j, ig, ipol, jpol, jrap, dimen, npw
 
   COMPLEX(DP) :: zdotc          ! moltiplication factors
 
@@ -754,9 +759,7 @@ SUBROUTINE find_band_sym_so (evc,et,nsym,s,ftau,d_spin,gk, &
      ENDIF
   ENDDO
   istart(ngroup+1)=nbnd+1
-  !
-  !  Find the character of one symmetry operation per class
-  !
+
   trace=(0.d0,0.d0)
   DO iclass=1,nclass
      irot=elem_so(1,iclass)
@@ -765,11 +768,12 @@ SUBROUTINE find_band_sym_so (evc,et,nsym,s,ftau,d_spin,gk, &
      !   NB: rotate_psi assumes that s is in the small group of k. It does not
      !       rotate the k point.
      !
-      CALL rotate_all_psi_so(evc,evcr,s(1,1,irot),        &
-           ftau(1,irot),d_spin(1,1,irot),has_e(1,iclass),gk(1,irot))
+      CALL rotate_all_psi_so(ik,evc,evcr,s(1,1,invs(irot)),        &
+           ftau(1,invs(irot)),d_spin(1,1,irot),has_e(1,iclass),gk(1,invs(irot)))
      !
      !   and apply S in the US case.
      !
+     npw = ngk(ik)
      IF ( okvan ) THEN
         CALL calbec( npw, vkb, evcr, becp )
         CALL s_psi( npwx, npw, nbnd, evcr, evcr )
@@ -790,10 +794,10 @@ SUBROUTINE find_band_sym_so (evc,et,nsym,s,ftau,d_spin,gk, &
   !
   CALL mp_sum(trace,intra_bgrp_comm)
   !
-  !DO iclass=1,nclass
-  !   write(6,'(i5,3(2f11.8,1x))') iclass,trace(iclass,1),trace(iclass,2), &
-  !                                       trace(iclass,3)
-  !ENDDO
+!  DO iclass=1,nclass
+!     write(6,'(i5,3(2f11.8,1x))') iclass,trace(iclass,1),trace(iclass,2), &
+!                                         trace(iclass,3)
+!  ENDDO
   !
   !  And now use the character table to identify the symmetry representation
   !  of each group of bands
@@ -813,10 +817,11 @@ SUBROUTINE find_band_sym_so (evc,et,nsym,s,ftau,d_spin,gk, &
         times(igroup,irap)=(0.d0,0.d0)
         DO iclass=1,nclass
            times(igroup,irap)=times(igroup,irap) &
-                +conjg(trace(iclass,igroup))*char_mat_so(irap, &
-                which_irr_so(iclass))*dble(nelem_so(iclass))
+                +trace(iclass,igroup)*CONJG(char_mat_so(irap, &
+                which_irr_so(iclass)))*DBLE(nelem_so(iclass))
         ENDDO
         times(igroup,irap)=times(igroup,irap)/2/nsym
+
         IF ((abs(nint(dble(times(igroup,irap)))-dble(times(igroup,irap)))&
              > accuracy).or. (abs(aimag(times(igroup,irap))) > accuracy) ) THEN
            !            WRITE(stdout,'(5x,"e(",i3," -",i3,") = ",f12.5,2x,"eV",3x,i3,3x,&
@@ -865,7 +870,7 @@ SUBROUTINE find_band_sym_so (evc,et,nsym,s,ftau,d_spin,gk, &
   RETURN
 END SUBROUTINE find_band_sym_so
 
-SUBROUTINE rotate_all_psi_so(evc_nc,evcr,s,ftau,d_spin,has_e,gk)
+SUBROUTINE rotate_all_psi_so(ik,evc_nc,evcr,s,ftau,d_spin,has_e,gk)
   !
   !  This subroutine rotates a spinor wavefunction according to the symmetry
   !  s. d_spin contains the 2x2 rotation matrix in the spin space.
@@ -877,13 +882,15 @@ SUBROUTINE rotate_all_psi_so(evc_nc,evcr,s,ftau,d_spin,has_e,gk)
   USE scatter_mod,  ONLY : cgather_sym_many, cscatter_sym_many
   USE fft_interfaces, ONLY : fwfft, invfft
   USE gvect,     ONLY : ngm, nl
-  USE wvfct,     ONLY : nbnd, npwx, npw, igk
+  USE wvfct,     ONLY : nbnd, npwx
+  USE klist,     ONLY : ngk, igk_k
   USE noncollin_module, ONLY : npol
   USE mp_bands,  ONLY : intra_bgrp_comm
   USE mp,        ONLY : mp_sum
 
   IMPLICIT NONE
 
+  INTEGER, INTENT(in) :: ik
   INTEGER :: s(3,3), ftau(3), gk(3), has_e
   COMPLEX(DP) :: evc_nc(npwx,2,nbnd), evcr(npwx,2,nbnd), d_spin(2,2)
 
@@ -891,7 +898,7 @@ SUBROUTINE rotate_all_psi_so(evc_nc,evcr,s,ftau,d_spin,has_e,gk)
   COMPLEX(DP) :: phase
   REAL(DP) :: arg
   INTEGER :: i, j, k, ri, rj, rk, ir, rir, ipol, jpol, ibnd
-  INTEGER :: nr1, nr2, nr3, nr1x, nr2x, nr3x, nrxx
+  INTEGER :: nr1, nr2, nr3, nr1x, nr2x, nr3x, nrxx, npw
   LOGICAL :: zone_border
   INTEGER :: start_band, last_band, my_nbnd_proc
   INTEGER :: start_band_proc(dfftp%nproc), nbnd_proc(dfftp%nproc)
@@ -930,14 +937,15 @@ SUBROUTINE rotate_all_psi_so(evc_nc,evcr,s,ftau,d_spin,has_e,gk)
   !
   zone_border=(gk(1)/=0.or.gk(2)/=0.or.gk(3)/=0)
   !
-  !
+  npw = ngk(ik)
+  evcr_save=(0.0_DP,0.0_DP)
   DO ipol=1,npol
      !
      psic = ( 0.D0, 0.D0 )
      psir = ( 0.D0, 0.D0 )
      !
      DO ibnd=1,nbnd
-        psic(nl(igk(1:npw)),ibnd) = evc_nc(1:npw,ipol,ibnd)
+        psic(nl(igk_k(1:npw,ik)),ibnd) = evc_nc(1:npw,ipol,ibnd)
         CALL invfft ('Dense', psic(:,ibnd), dfftp)
      ENDDO
      !
@@ -984,7 +992,7 @@ SUBROUTINE rotate_all_psi_so(evc_nc,evcr,s,ftau,d_spin,has_e,gk)
                                start_band_proc)
         CALL fwfft ('Dense', psir, dfftp)
         !
-        evcr_save(1:npw,ipol,ibnd) = psir(nl(igk(1:npw)))
+        evcr_save(1:npw,ipol,ibnd) = psir(nl(igk_k(1:npw,ik)))
      ENDDO
      !
 #else
@@ -1017,7 +1025,7 @@ SUBROUTINE rotate_all_psi_so(evc_nc,evcr,s,ftau,d_spin,has_e,gk)
         ENDIF
         CALL fwfft ('Dense', psir(:), dfftp)
         !
-        evcr_save(1:npw,ipol,ibnd) = psir(nl(igk(1:npw)))
+        evcr_save(1:npw,ipol,ibnd) = psir(nl(igk_k(1:npw,ik)))
      ENDDO
      !
 #endif
@@ -1030,7 +1038,7 @@ SUBROUTINE rotate_all_psi_so(evc_nc,evcr,s,ftau,d_spin,has_e,gk)
      DO ipol=1,npol
         DO jpol=1,npol
            evcr(:,ipol,ibnd)=evcr(:,ipol,ibnd)+ &
-                conjg(d_spin(jpol,ipol))*evcr_save(:,jpol,ibnd)
+                             d_spin(ipol,jpol)*evcr_save(:,jpol,ibnd)
         ENDDO
      ENDDO
   ENDDO
@@ -1097,8 +1105,7 @@ SUBROUTINE find_nks1nks2(firstk,lastk,nks1tot,nks1,nks2tot,nks2,spin_component)
 END SUBROUTINE find_nks1nks2
 
 SUBROUTINE find_info_group(nsym,s,t_rev,ftau,d_spink,gk,sname,  &
-     s_is,d_spin_is,gk_is, &
-     is_symmorphic,search_sym)
+     s_is,d_spin_is,gk_is, invs_is,is_symmorphic,search_sym)
   !
   ! This routine receives as input a point group and sets the corresponding
   ! variables for the description of the classes and of the irreducible
@@ -1107,6 +1114,7 @@ SUBROUTINE find_info_group(nsym,s,t_rev,ftau,d_spink,gk,sname,  &
   !
   USE kinds,                ONLY : DP
   USE cell_base,            ONLY : at, bg
+  USE fft_base,             ONLY : dfftp
   USE noncollin_module,     ONLY : noncolin
   USE spin_orb,             ONLY : domag
   USE rap_point_group,      ONLY : code_group, nclass, nelem, elem, which_irr, &
@@ -1126,7 +1134,7 @@ SUBROUTINE find_info_group(nsym,s,t_rev,ftau,d_spink,gk,sname,  &
        gk(3,48)
 
   INTEGER, INTENT(out) :: s_is(3,3,48),   & ! rotation matrices
-       gk_is(3,48)
+       gk_is(3,48), invs_is(48)
 
   COMPLEX(DP),INTENT(out)   :: d_spink(2,2,48),  & ! rotation in spin space
        d_spin_is(2,2,48)   ! rotation in spin space
@@ -1136,8 +1144,10 @@ SUBROUTINE find_info_group(nsym,s,t_rev,ftau,d_spink,gk,sname,  &
 
   CHARACTER(len=45), INTENT(in) :: sname(48)
 
-  REAL(DP) :: sr(3,3,48)
-  INTEGER :: isym
+  REAL(DP) :: sr(3,3,48), ft(3,48)
+  INTEGER :: isym, jsym, ss(3,3)
+  LOGICAL :: found
+
 
   is_symmorphic=.true.
   search_sym=.true.
@@ -1148,11 +1158,18 @@ SUBROUTINE find_info_group(nsym,s,t_rev,ftau,d_spink,gk,sname,  &
           (ftau(3,isym)==0) )
   ENDDO
 
-  IF (.not.is_symmorphic) THEN
+  IF (.NOT.is_symmorphic) THEN
+     DO isym = 1, nsym
+        ft(1,isym) = DBLE(ftau(1,isym)) / DBLE(dfftp%nr1)
+        ft(2,isym) = DBLE(ftau(2,isym)) / DBLE(dfftp%nr2)
+        ft(3,isym) = DBLE(ftau(3,isym)) / DBLE(dfftp%nr3)
+     END DO
+
      DO isym=1,nsym
-        search_sym=( search_sym.and.(gk(1,isym)==0).and.  &
-             (gk(2,isym)==0).and.  &
-             (gk(3,isym)==0) )
+        DO jsym=1,nsym
+           search_sym=search_sym.AND.(ABS(gk(1,isym)*ft(1,jsym)+ &
+                     gk(2,isym)*ft(2,jsym)+gk(3,isym)*ft(3,jsym))<1.D-8) 
+        ENDDO
      ENDDO
   ENDIF
   !
@@ -1182,6 +1199,53 @@ SUBROUTINE find_info_group(nsym,s,t_rev,ftau,d_spink,gk,sname,  &
         ENDIF
      ENDIF
   ENDDO
+
+  IF (noncolin.AND.domag) THEN
+!
+!   find the inverse of each element
+!
+     DO isym = 1, nsym_is
+        found = .FALSE.
+        DO jsym = 1, nsym_is
+           !
+           ss = MATMUL (s_is(:,:,jsym),s_is(:,:,isym))
+           ! s(:,:,1) is the identity
+           IF ( ALL ( s_is(:,:,1) == ss(:,:) ) ) THEN
+              invs_is (isym) = jsym
+              found = .TRUE.
+           ENDIF
+        END DO
+        IF ( .NOT.found) CALL errore ('find_info_group', ' Not a group', 1)
+     ENDDO
+!
+!   Recheck if we can compute the representations. The group is now smaller
+!
+     is_symmorphic=.TRUE.
+     search_sym=.TRUE.
+
+     DO isym=1,nsym_is
+        is_symmorphic=( is_symmorphic.AND.(ftau_is(1,isym)==0).AND.  &
+                                          (ftau_is(2,isym)==0).AND.  &
+                                          (ftau_is(3,isym)==0) )
+     ENDDO
+     IF (.NOT.is_symmorphic) THEN
+        DO isym = 1, nsym_is
+           ft(1,isym) = DBLE(ftau_is(1,isym)) / DBLE(dfftp%nr1)
+           ft(2,isym) = DBLE(ftau_is(2,isym)) / DBLE(dfftp%nr2)
+           ft(3,isym) = DBLE(ftau_is(3,isym)) / DBLE(dfftp%nr3)
+        END DO
+        DO isym=1,nsym_is
+           DO jsym=1,nsym_is
+              search_sym=search_sym.AND.(ABS(gk_is(1,isym)*ft(1,jsym)+ &
+                                             gk_is(2,isym)*ft(2,jsym)+     &
+                                             gk_is(3,isym)*ft(3,jsym))<1.D-8) 
+           ENDDO
+        ENDDO
+     ENDIF
+  END IF
+  !
+  !  Set the group name, divide it in classes and set the irreducible
+  !
   CALL find_group(nsym,sr,gname,code_group)
   IF (noncolin) THEN
      IF (domag) THEN

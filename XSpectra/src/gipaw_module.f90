@@ -166,7 +166,7 @@ CONTAINS
   ! Broadcast input data to all processors
   !-----------------------------------------------------------------------
   SUBROUTINE gipaw_bcast_input
-#ifdef __MPI
+#if defined(__MPI)
     USE mp,            ONLY : mp_bcast
     USE mp_world,      ONLY : world_comm
     USE io_files,      ONLY : prefix, tmp_dir
@@ -234,7 +234,7 @@ CONTAINS
     USE io_global,        ONLY : stdout
     USE wvfct,            ONLY : nbnd, npwx
     USE ldaU,             ONLY : lda_plus_U, nwfcU
-    USE io_files,         ONLY : prefix, iunhub, iunwfc, iunigk, &
+    USE io_files,         ONLY : prefix, iunhub, iunwfc, &
                                  nwordwfcU, nwordwfc, seqopn
     USE noncollin_module, ONLY : npol
     USE buffers,          ONLY : open_buffer
@@ -256,10 +256,6 @@ CONTAINS
     IF ( lda_plus_u ) &
        CALL open_buffer( iunhub, 'hub', nwordwfcU, io_level, exst )
     !
-    ! ... iunigk contains the number of PW and the indices igk
-    ! ... 
-    CALL seqopn( iunigk, 'igk', 'UNFORMATTED', exst )
-    !
     RETURN
   END SUBROUTINE gipaw_openfil
   !-----------------------------------------------------------------------
@@ -277,10 +273,9 @@ CONTAINS
     call print_clock ('greenf')
     call print_clock ('cgsolve')
     call print_clock ('ch_psi')
-    call print_clock ('h_psiq')
+    call print_clock ('h_psi')
     WRITE( stdout, * )
     call print_clock ('u_kq')
-    call print_clock ('h_psi')
     WRITE( stdout, * )
     call print_clock ('apply_p')
     call print_clock ('apply_vel')
@@ -298,7 +293,7 @@ CONTAINS
     call print_clock ('davcio')
     call print_clock ('write_rec')
     WRITE( stdout, * )
-#ifdef __MPI
+#if defined(__MPI)
     WRITE( stdout,  * ) '     Parallel routines'
     call print_clock ('reduce')
 #endif
@@ -764,7 +759,7 @@ CONTAINS
         emin = min (emin, et (ibnd, ik) )
       enddo
     enddo
-#ifdef __MPI
+#if defined(__MPI)
     ! find the minimum across pools
     call mp_min( emin, inter_pool_comm )
 #endif
@@ -777,7 +772,7 @@ CONTAINS
           emax = max (emax, et (ibnd, ik) )
         enddo
       enddo
-#ifdef __MPI
+#if defined(__MPI)
       ! find the maximum across pools
       call mp_max( emax, inter_pool_comm )
 #endif

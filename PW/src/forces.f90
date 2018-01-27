@@ -5,6 +5,10 @@
 ! in the root directory of the present distribution,
 ! or http://www.gnu.org/copyleft/gpl.txt .
 !
+!----------------------------------------------------------------------------
+! TB
+! included gate related forces
+!----------------------------------------------------------------------------
 !
 !----------------------------------------------------------------------------
 SUBROUTINE forces()
@@ -21,33 +25,38 @@ SUBROUTINE forces()
   ! ...  e)  force_corr,  correction term for incomplete self-consistency
   ! ...  f)  force_hub,   contribution due to the Hubbard term
   ! ...  g)  force_london, semi-empirical correction for dispersion forces
+  ! ...  h)  force_d3,    Grimme-D3 (DFT-D3) correction to dispersion forces
   !
   !
   USE kinds,         ONLY : DP
   USE io_global,     ONLY : stdout
   USE cell_base,     ONLY : at, bg, alat, omega  
-  USE ions_base,     ONLY : nat, ntyp => nsp, ityp, tau, zv, amass, extfor
+  USE ions_base,     ONLY : nat, ntyp => nsp, ityp, tau, zv, amass, extfor, atm
   USE fft_base,      ONLY : dfftp
   USE gvect,         ONLY : ngm, gstart, ngl, nl, igtongl, g, gg, gcutm
   USE lsda_mod,      ONLY : nspin
   USE symme,         ONLY : symvector
   USE vlocal,        ONLY : strf, vloc
-  USE force_mod,     ONLY : force, lforce
+  USE force_mod,     ONLY : force, lforce, sumfor
   USE scf,           ONLY : rho
   USE ions_base,     ONLY : if_pos
   USE ldaU,          ONLY : lda_plus_u, U_projection
-  USE extfield,      ONLY : tefield, forcefield
+  USE extfield,      ONLY : tefield, forcefield, gate, forcegate, relaxz
   USE control_flags, ONLY : gamma_only, remove_rigid_rot, textfor, &
-                            iverbosity, llondon, lxdm, ts_vdw
+                            iverbosity, llondon, ldftd3, lxdm, ts_vdw
   USE plugin_flags
   USE bp,            ONLY : lelfield, gdir, l3dstring, efield_cart, &
                             efield_cry,efield
   USE uspp,          ONLY : okvan
   USE martyna_tuckerman, ONLY: do_comp_mt, wg_corr_force
   USE london_module, ONLY : force_london
+  USE dftd3_api,     ONLY : get_atomic_number, dftd3_calc
+  USE dftd3_qe,      ONLY: dftd3_pbc_gdisp, dftd3
+
   USE xdm_module,    ONLY : force_xdm
   USE tsvdw_module,  ONLY : FtsvdW
   USE esm,           ONLY : do_comp_esm, esm_bc, esm_force_ew
+  USE qmmm,          ONLY : qmmm_mode
   !
   IMPLICIT NONE
   !
@@ -56,6 +65,7 @@ SUBROUTINE forces()
                            forcecc(:,:), &
                            forceion(:,:), &
                            force_disp(:,:),&
+                           force_d3(:,:),&
                            force_disp_xdm(:,:),&
                            force_mt(:,:), &
                            forcescc(:,:), &
@@ -68,11 +78,15 @@ SUBROUTINE forces()
 !
   COMPLEX(DP), ALLOCATABLE :: auxg(:), auxr(:)
 !
-  REAL(DP) :: sumfor, sumscf, sum_mm
-  REAL(DP),PARAMETER :: eps = 1.e-12_dp
+  REAL(DP) :: sumscf, sum_mm
+  REAL(DP), PARAMETER :: eps = 1.e-12_dp
   INTEGER  :: ipol, na
     ! counter on polarization
     ! counter on atoms
+  !
+  REAL(DP) :: latvecs(3,3)
+  INTEGER :: atnum(1:nat)
+  REAL(DP) :: stress_dftd3(3,3)
   !
   !
   CALL start_clock( 'forces' )
@@ -121,6 +135,23 @@ SUBROUTINE forces()
     force_disp = force_london( alat , nat , ityp , at , bg , tau )
     !
   END IF
+  !
+  ! ... The Grimme-D3 dispersion correction
+  !
+  IF ( ldftd3 ) THEN
+    !
+    ALLOCATE ( force_d3 (3, nat))
+    force_d3 ( : , : ) = 0.0_DP
+    latvecs(:,:) = at(:,:)*alat
+    tau(:,:)=tau(:,:)*alat
+    atnum(:) = get_atomic_number(atm(ityp(:)))
+    call dftd3_pbc_gdisp(dftd3, tau, atnum, latvecs, &
+                         force_d3, stress_dftd3)
+    force_d3 = -2.d0*force_d3
+    tau(:,:)=tau(:,:)/alat
+  END IF
+  !
+  !
   IF (lxdm) THEN
      ALLOCATE (force_disp_xdm(3,nat))
      force_disp_xdm = 0._dp
@@ -181,53 +212,40 @@ SUBROUTINE forces()
                          forcescc(ipol,na)
         !
         IF ( llondon ) force(ipol,na) = force(ipol,na) + force_disp(ipol,na)
+        IF ( ldftd3 )  force(ipol,na) = force(ipol,na) + force_d3(ipol,na)
         IF ( lxdm )    force(ipol,na) = force(ipol,na) + force_disp_xdm(ipol,na)
         ! factor 2 converts from Ha to Ry a.u.
         IF ( ts_vdw )  force(ipol,na) = force(ipol,na) + 2.0_dp*FtsvdW(ipol,na)
         IF ( tefield ) force(ipol,na) = force(ipol,na) + forcefield(ipol,na)
+        IF ( gate ) force(ipol,na) = force(ipol,na) + forcegate(ipol,na) ! TB
         IF (lelfield)  force(ipol,na) = force(ipol,na) + forces_bp_efield(ipol,na)
         IF (do_comp_mt)force(ipol,na) = force(ipol,na) + force_mt(ipol,na) 
 
-        IF ( do_comp_esm .and. ( esm_bc .ne. 'pbc' ) ) THEN
-           IF ( ipol .ne. 3 ) sumfor = sumfor + force(ipol,na)
-        ELSE
-           sumfor = sumfor + force(ipol,na)
-        ENDIF
+        sumfor = sumfor + force(ipol,na)
         !
      END DO
      !
-     IF ( do_comp_esm .and. ( esm_bc .ne. 'pbc' ) ) THEN
+     !TB
+     IF ((gate.and.relaxz).AND.(ipol==3)) WRITE( stdout, '("Total force in z direction = 0 disabled")')
+     !
+     IF ( (do_comp_esm .and. ( esm_bc .ne. 'pbc' )).or.(gate.and.relaxz) ) THEN
         !
         ! ... impose total force along xy = 0
         !
         DO na = 1, nat
-           !
            IF ( ipol .ne. 3) force(ipol,na) = force(ipol,na)  &
                                             - sumfor / DBLE ( nat )
-           !
         END DO
-     ELSE
         !
-        ! ... impose total force = 0
+     ELSE IF ( qmmm_mode < 0 ) THEN
+        !
+        ! ... impose total force = 0 except in a QM-MM calculation
         !
         DO na = 1, nat
-           !
            force(ipol,na) = force(ipol,na) - sumfor / DBLE( nat ) 
-           !
         END DO
+        !
      ENDIF
-     !
-#ifdef __MS2
-     !
-     ! ... impose total force of the quantum subsystem /= 0
-     !
-     DO na = 1, nat
-        !
-        force(ipol,na) = force(ipol,na) + sumfor / DBLE( nat )
-        !
-     END DO
-     !
-#endif
      !
   END DO
   !
@@ -246,7 +264,7 @@ SUBROUTINE forces()
   !
   ! ... write on output the forces
   !
-  WRITE( stdout, '(/,5x,"Forces acting on atoms (Ry/au):", / )')
+  WRITE( stdout, '(/,5x,"Forces acting on atoms (cartesian axes, Ry/au):", / )')
   DO na = 1, nat
      WRITE( stdout, 9035) na, ityp(na), force(:,na)
   END DO
@@ -296,6 +314,13 @@ SUBROUTINE forces()
         END DO
      END IF
      !
+     IF ( ldftd3 ) THEN
+        WRITE( stdout, '(/,5x,"DFT-D3 dispersion contribution to forces:")')
+        DO na = 1, nat
+           WRITE( stdout, 9035) na, ityp(na), (force_d3(ipol,na), ipol = 1, 3)
+        END DO
+     END IF
+     !
      IF (lxdm) THEN
         WRITE( stdout, '(/,5x,"XDM contribution to forces:")')
         DO na = 1, nat
@@ -307,6 +332,14 @@ SUBROUTINE forces()
         WRITE( stdout, '(/,5x,"TS-VDW contribution to forces:")')
         DO na = 1, nat
            WRITE( stdout, 9035) na, ityp(na), (2.0d0*FtsvdW(ipol,na), ipol=1,3)
+        END DO
+     END IF
+     !
+     ! TB gate forces
+     IF ( gate ) THEN
+        WRITE( stdout, '(/,5x,"Gate contribution to forces:")')
+        DO na = 1, nat
+           WRITE( stdout, 9035) na, ityp(na), (forcegate(ipol,na), ipol = 1, 3)
         END DO
      END IF
      !
@@ -340,6 +373,18 @@ SUBROUTINE forces()
      !
   END IF
   !
+  IF ( ldftd3 .AND. iverbosity > 0 ) THEN
+     !
+     sum_mm = 0.D0
+     DO na = 1, nat
+        sum_mm = sum_mm + &
+                 force_d3(1,na)**2 + force_d3(2,na)**2 + force_d3(3,na)**2
+     END DO
+     sum_mm = SQRT( sum_mm )
+     WRITE ( stdout, '(/,5x, "DFT-D3 dispersion Force = ",F12.6)') sum_mm
+     !
+  END IF
+  !
   IF ( lxdm .AND. iverbosity > 0 ) THEN
      !
      sum_mm = 0.D0
@@ -354,6 +399,7 @@ SUBROUTINE forces()
   !
   DEALLOCATE( forcenl, forcelc, forcecc, forceh, forceion, forcescc )
   IF ( llondon )  DEALLOCATE ( force_disp )
+  IF ( ldftd3 ) DEALLOCATE ( force_d3 )
   IF ( lxdm ) DEALLOCATE( force_disp_xdm ) 
   IF ( lelfield ) DEALLOCATE ( forces_bp_efield )
   !
@@ -361,7 +407,7 @@ SUBROUTINE forces()
   !
   CALL stop_clock( 'forces' )
   !
-  IF ( ( sumfor < 10.D0*sumscf ) .AND. ( sumfor > eps ) ) &
+  IF ( ( sumfor < 10.D0*sumscf ) .AND. ( sumfor > nat*eps ) ) &
   WRITE( stdout,'(5x,"SCF correction compared to forces is large: ", &
                    &  "reduce conv_thr to get better values")')
   !

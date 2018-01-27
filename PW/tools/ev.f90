@@ -84,7 +84,7 @@ PROGRAM ev
                     au_unit=='ang'
       IF (in_angstrom) WRITE(*,'(5x,"Assuming Angstrom")')
       WRITE(*,'(5x,"Enter type of bravais lattice (fcc, bcc, sc, noncubic) > ")', advance="NO")
-      READ(6,'(a)') bravais
+      READ(5,'(a)') bravais
 !
       IF(trim(bravais)=='fcc'.or.trim(bravais)=='FCC') THEN
          fac = 0.25d0
@@ -291,16 +291,16 @@ PROGRAM ev
 
       IF(istat==1) THEN
          WRITE(iun,'("# equation of state: birch 1st order.  chisq = ", &
-                   & d10.4)') chisq
+                   & d12.4)') chisq
       ELSEIF(istat==2) THEN
          WRITE(iun,'("# equation of state: birch 3rd order.  chisq = ", &
-                   & d10.4)') chisq
+                   & d12.4)') chisq
       ELSEIF(istat==3) THEN
          WRITE(iun,'("# equation of state: keane.            chisq = ", &
-                   & d10.4)') chisq
+                   & d12.4)') chisq
       ELSEIF(istat==4) THEN
          WRITE(iun,'("# equation of state: murnaghan.        chisq = ", &
-                   & d10.4)') chisq
+                   & d12.4)') chisq
       ENDIF
 
       IF(istat==1 .or. istat==4) par(4) = 0.0d0

@@ -36,12 +36,6 @@ MODULE becmod
   TYPE (bec_type) :: becp  ! <beta|psi>
 
   PRIVATE
-
-  REAL(DP), ALLOCATABLE :: &
-       becp_r(:,:)       !   <beta|psi> for real (at Gamma) wavefunctions
-  COMPLEX(DP), ALLOCATABLE ::  &
-       becp_k (:,:), &    !  as above for complex wavefunctions
-       becp_nc(:,:,:)   !  as above for spinors
   !
   INTERFACE calbec
      !
@@ -64,7 +58,7 @@ CONTAINS
     !-----------------------------------------------------------------------
     !_
     USE mp_bands, ONLY: intra_bgrp_comm
-    USE mp,       ONLY: mp_size, mp_rank, mp_get_comm_null
+    USE mp,       ONLY: mp_get_comm_null
     !
     IMPLICIT NONE
     COMPLEX (DP), INTENT (in) :: beta(:,:), psi(:,:)
@@ -74,9 +68,8 @@ CONTAINS
     INTEGER, OPTIONAL :: nbnd
     !
     INTEGER :: local_nbnd
-    INTEGER, EXTERNAL :: ldim_block, lind_block, gind_block
-    INTEGER :: nproc, mype, m_loc, m_begin, m_max, ip
-    INTEGER :: ibnd, ibnd_loc
+    INTEGER, EXTERNAL :: ldim_block, gind_block
+    INTEGER :: m_loc, m_begin, ip
     REAL(DP), ALLOCATABLE :: dtmp(:,:)
     !
     IF ( present (nbnd) ) THEN
@@ -192,12 +185,12 @@ CONTAINS
         IF ( gstart == 2 ) &
            CALL DGER( nkb, m, -1.0_DP, beta, 2*npwx, psi, 2*npwx, betapsi, nkb )
         !
-     ENDIF
-     !
-     CALL mp_sum( betapsi( :, 1:m ), comm )
-     !
-     CALL stop_clock( 'calbec' )
-     !
+    ENDIF
+    !
+    CALL mp_sum( betapsi( :, 1:m ), comm )
+    !
+    CALL stop_clock( 'calbec' )
+    !
     RETURN
     !
   END SUBROUTINE calbec_gamma
@@ -335,7 +328,7 @@ CONTAINS
     INTEGER, INTENT (in) :: nkb, nbnd
     INTEGER, INTENT (in), OPTIONAL :: comm
     INTEGER :: ierr, nbnd_siz
-    INTEGER, EXTERNAL :: ldim_block, lind_block, gind_block
+    INTEGER, EXTERNAL :: ldim_block, gind_block
     !
     nbnd_siz = nbnd
     bec%comm = mp_get_comm_null()
@@ -413,7 +406,7 @@ CONTAINS
     INTEGER, INTENT(in) :: nkb, nbnd
 
     IF (gamma_only) THEN
-       CALL dcopy(nkb*nbnd, bec1%r, 1, bec%r, 1)
+       CALL dcopy(nkb*nbnd, bec%r, 1, bec1%r, 1)
     ELSEIF (noncolin) THEN
        CALL zcopy(nkb*npol*nbnd, bec%nc, 1, bec1%nc,  1)
     ELSE

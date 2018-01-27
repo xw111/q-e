@@ -68,7 +68,7 @@
 PROGRAM bgw2pw
 
   USE environment, ONLY : environment_start, environment_end
-  USE io_files, ONLY : prefix, tmp_dir, outdir
+  USE io_files, ONLY : prefix, tmp_dir
   USE io_global, ONLY : ionode, ionode_id
   USE kinds, ONLY : DP
   USE mp, ONLY : mp_bcast
@@ -85,6 +85,7 @@ PROGRAM bgw2pw
   integer :: wfng_nband
   logical :: rhog_flag
   character ( len = 256 ) :: rhog_file
+  character ( len = 256 ) :: outdir
 
   NAMELIST / input_bgw2pw / prefix, outdir, &
     real_or_complex, wfng_flag, wfng_file, wfng_nband, &
@@ -96,7 +97,7 @@ PROGRAM bgw2pw
 
   character (len=256), external :: trimcheck
 
-#ifdef __MPI
+#if defined(__MPI)
   CALL mp_startup ( )
 #endif
 
@@ -122,7 +123,6 @@ PROGRAM bgw2pw
   ENDIF
 
   tmp_dir = trimcheck ( outdir )
-  CALL mp_bcast ( outdir, ionode_id, world_comm )
   CALL mp_bcast ( tmp_dir, ionode_id, world_comm )
   CALL mp_bcast ( prefix, ionode_id, world_comm )
   CALL mp_bcast ( real_or_complex, ionode_id, world_comm )
@@ -134,17 +134,11 @@ PROGRAM bgw2pw
 
   CALL read_file ( )
 
-  ! this is needed to compute igk and store in iunigk
-  ! cannot use gk_sort because for some k-points
-  ! gk_sort generates different igk on every call
-  CALL openfil ( )
-  CALL hinit0 ( )
-
   CALL openfil_pp ( )
 
   IF ( wfng_flag ) THEN
-    input_file_name = TRIM ( outdir ) // '/' // TRIM ( wfng_file )
-    output_dir_name = TRIM ( outdir ) // '/' // TRIM ( prefix ) // '.save'
+    input_file_name = TRIM ( tmp_dir ) // TRIM ( wfng_file )
+    output_dir_name = TRIM ( tmp_dir ) // TRIM ( prefix ) // '.save'
     IF ( ionode ) WRITE ( 6, '(5x,"call write_evc")' )
     CALL start_clock ( 'write_evc' )
     CALL write_evc ( input_file_name, real_or_complex, wfng_nband, &
@@ -154,8 +148,8 @@ PROGRAM bgw2pw
   ENDIF
 
   IF ( rhog_flag ) THEN
-    input_file_name = TRIM ( outdir ) // '/' // TRIM ( rhog_file )
-    output_dir_name = TRIM ( outdir ) // '/' // TRIM ( prefix ) // '.save'
+    input_file_name = TRIM ( tmp_dir ) // TRIM ( rhog_file )
+    output_dir_name = TRIM ( tmp_dir ) // TRIM ( prefix ) // '.save'
     IF ( ionode ) WRITE ( 6, '(5x,"call write_cd")' )
     CALL start_clock ( 'write_cd' )
     CALL write_cd ( input_file_name, real_or_complex, output_dir_name )
@@ -187,25 +181,26 @@ SUBROUTINE write_evc ( input_file_name, real_or_complex, &
   USE constants, ONLY : eps6
   USE fft_base, ONLY : dfftp
   USE gvect, ONLY : ngm, ngm_g, ig_l2g, mill, g
-  USE io_files, ONLY : iunigk
   USE io_global, ONLY : ionode, ionode_id
   USE ions_base, ONLY : nat
   USE iotk_module, ONLY : iotk_attlenx, iotk_free_unit, iotk_open_write, &
     iotk_write_begin, iotk_write_attr, iotk_write_empty, iotk_write_dat, &
     iotk_write_end, iotk_close_write, iotk_index
   USE kinds, ONLY : DP
-  USE klist, ONLY : xk, nks, nkstot, ngk
+  USE klist, ONLY : xk, nks, nkstot, ngk, igk_k
   USE lsda_mod, ONLY : nspin
   USE mp, ONLY : mp_bcast, mp_sum, mp_max, mp_barrier
   USE mp_world, ONLY : world_comm, nproc
   USE mp_pools, ONLY : kunit, npool, my_pool_id, intra_pool_comm
   USE symm_base, ONLY : s, nsym
   USE xml_io_base, ONLY : create_directory
+#if defined (__OLDXML)
   USE qexml_module, ONLY : qexml_kpoint_dirname, qexml_wfc_filename
-#ifdef __MPI
+#endif
+#if defined(__MPI)
   USE parallel_include, ONLY : MPI_INTEGER, MPI_DOUBLE_COMPLEX
 #endif
-  USE wvfct, ONLY : npwx, g2kin, ecutwfc, igk
+  USE wvfct, ONLY : npwx
 
   IMPLICIT NONE
 
@@ -217,8 +212,9 @@ SUBROUTINE write_evc ( input_file_name, real_or_complex, &
   logical :: f1, f2
   integer :: ierr, i, j, iu, ik, is, ib, ig, jg, fg, ir, &
     na, nk, ns, nb, nbgw, ng, ngkmax, ntran, cell_symmetry, &
-    nkbl, nkl, nkr, iks, ike, npw, npw_g, ngkdist_l, ngkdist_g, &
+    iks, ike, npw, npw_g, ngkdist_l, ngkdist_g, &
     igk_l2g, irecord, nrecord, ng_irecord, nr ( 3 )
+  integer :: global_kpoint_index
   real ( DP ) :: ecutrho, ecutwfn, celvol, recvol, al, bl, xdel, &
     a ( 3, 3 ), b ( 3, 3 ), adot ( 3, 3 ), bdot ( 3, 3 )
   character :: sdate*32, stime*32, stitle*32
@@ -408,7 +404,7 @@ SUBROUTINE write_evc ( input_file_name, real_or_complex, &
         ENDDO
       ENDDO
     ENDIF
-#ifdef __MPI
+#if defined(__MPI)
     CALL mp_barrier ( world_comm )
     CALL MPI_Scatter ( gk_buf, 3 * ngkdist_l, MPI_INTEGER, &
     gk_dist, 3 * ngkdist_l, MPI_INTEGER, &
@@ -448,7 +444,7 @@ SUBROUTINE write_evc ( input_file_name, real_or_complex, &
         DO is = 1, ns
           IF ( real_or_complex .EQ. 1 ) THEN
             DO ig = 1, ngk_g ( ik )
-              wfng_buf ( ig, is ) = CMPLX ( wfngr ( ig, is ), 0.0D0 )
+              wfng_buf ( ig, is ) = CMPLX ( wfngr ( ig, is ), 0.0D0, KIND=dp )
             ENDDO
           ELSE
             DO ig = 1, ngk_g ( ik )
@@ -460,7 +456,7 @@ SUBROUTINE write_evc ( input_file_name, real_or_complex, &
           ENDDO
         ENDDO
       ENDIF
-#ifdef __MPI
+#if defined(__MPI)
       DO is = 1, ns
         CALL mp_barrier ( world_comm )
         CALL MPI_Scatter ( wfng_buf ( :, is ), ngkdist_l, MPI_DOUBLE_COMPLEX, &
@@ -471,7 +467,7 @@ SUBROUTINE write_evc ( input_file_name, real_or_complex, &
 #else
       DO is = 1, ns
         DO ig = 1, ngkdist_g
-          wfng_dist ( ig, ib, is, ik ) = wfng_buf ( ig, is )
+         wfng_dist ( ig, ib, is, ik ) = wfng_buf ( ig, is )
         ENDDO
       ENDDO
 #endif
@@ -505,30 +501,27 @@ SUBROUTINE write_evc ( input_file_name, real_or_complex, &
 
   CALL mp_bcast ( ngk_g, ionode_id, world_comm )
 
-  nkbl = nkstot / kunit
-  nkl = kunit * ( nkbl / npool )
-  nkr = ( nkstot - nkl * npool ) / kunit
-  IF ( my_pool_id .LT. nkr ) nkl = nkl + kunit
-  iks = nkl * my_pool_id + 1
-  IF ( my_pool_id .GE. nkr ) iks = iks + nkr * kunit
-  ike = iks + nkl - 1
+  iks =  global_kpoint_index (nkstot, 1)
+  ike = iks + nks -1 
 
   npw_g = 0
-  IF ( nks > 1 ) REWIND ( iunigk )
   DO ik = 1, nks
-    IF ( nks > 1 ) READ ( iunigk ) igk
     npw = ngk ( ik )
     DO ig = 1, npw
-      igk_l2g = ig_l2g ( igk ( ig ) )
+      igk_l2g = ig_l2g ( igk_k (ig, ik) )
       IF ( igk_l2g .GT. npw_g ) npw_g = igk_l2g
     ENDDO
   ENDDO
   CALL mp_max ( npw_g, world_comm )
 
   CALL create_directory ( output_dir_name )
+#if defined (__OLDXML)
   DO ik = 1, nk
     CALL create_directory (qexml_kpoint_dirname( output_dir_name, ik ) )
   ENDDO
+#else
+  CALL errore('bgw2pw','XSD implementation pending',1)
+#endif
 
   filename = TRIM ( output_dir_name ) // '/gvectors.dat'
 
@@ -549,8 +542,9 @@ SUBROUTINE write_evc ( input_file_name, real_or_complex, &
 
   DO ik = 1, nk
 
+#if defined (__OLDXML)
     filename = TRIM ( qexml_wfc_filename ( output_dir_name, 'gkvectors', ik ) )
-
+#endif
     IF ( ionode ) THEN
       CALL iotk_open_write ( iu, FILE = TRIM ( filename ), ROOT="GK-VECTORS", BINARY = .TRUE. )
       CALL iotk_write_dat ( iu, "NUMBER_OF_GK-VECTORS", ngk_g ( ik ) )
@@ -559,7 +553,7 @@ SUBROUTINE write_evc ( input_file_name, real_or_complex, &
       CALL iotk_write_attr ( attr, "UNITS", "2 pi / a", FIRST = .TRUE. )
       CALL iotk_write_dat ( iu, "K-POINT_COORDS", k ( :, ik ), ATTR = attr )
     ENDIF
-#ifdef __MPI
+#if defined(__MPI)
     CALL mp_barrier ( world_comm )
     CALL MPI_Gather ( igk_dist ( :, ik ) , ngkdist_l, MPI_INTEGER, &
     igk_buf, ngkdist_l, MPI_INTEGER, &
@@ -577,13 +571,13 @@ SUBROUTINE write_evc ( input_file_name, real_or_complex, &
     ENDIF
 
     DO is = 1, ns
-
+#if defined (__OLDXML)
       IF ( ns .GT. 1 ) THEN
         filename = TRIM ( qexml_wfc_filename ( output_dir_name, 'eigenval', ik, is, EXTENSION = 'xml' ) )
       ELSE
         filename = TRIM ( qexml_wfc_filename ( output_dir_name, 'eigenval', ik, EXTENSION = 'xml' ) )
       ENDIF
-
+#endif
       IF ( ionode ) THEN
         CALL iotk_open_write ( iu, FILE = TRIM ( filename ), BINARY = .FALSE. )
         CALL iotk_write_attr ( attr, "nbnd", nb, FIRST = .TRUE. )
@@ -596,13 +590,13 @@ SUBROUTINE write_evc ( input_file_name, real_or_complex, &
         CALL iotk_write_dat ( iu, "OCCUPATIONS", oc ( :, ik, is ) )
         CALL iotk_close_write ( iu )
       ENDIF
-
+#if defined (__OLDXML)
       IF ( ns .GT. 1 ) THEN
         filename = TRIM ( qexml_wfc_filename ( output_dir_name, 'evc', ik, is ) )
       ELSE
         filename = TRIM ( qexml_wfc_filename ( output_dir_name, 'evc', ik ) )
       ENDIF
-
+#endif
       IF ( ionode ) THEN
         CALL iotk_open_write ( iu, FILE = TRIM ( filename ), ROOT = "WFC", BINARY = .TRUE. )
         CALL iotk_write_attr ( attr, "ngw", npw_g, FIRST = .TRUE. )
@@ -617,7 +611,7 @@ SUBROUTINE write_evc ( input_file_name, real_or_complex, &
         CALL iotk_write_empty ( iu, "INFO", attr )
       ENDIF
       DO ib = 1, nb
-#ifdef __MPI
+#if defined(__MPI)
         CALL mp_barrier ( world_comm )
         CALL MPI_Gather ( wfng_dist ( :, ib, is, ik ), ngkdist_l, MPI_DOUBLE_COMPLEX, &
         wfng_buf ( :, is ), ngkdist_l, MPI_DOUBLE_COMPLEX, &
@@ -664,7 +658,7 @@ SUBROUTINE write_cd ( input_file_name, real_or_complex, output_dir_name )
   USE gvect, ONLY : ngm, ngm_g, ig_l2g, nl, mill
   USE io_global, ONLY : ionode, ionode_id
   USE ions_base, ONLY : nat
-  USE io_rho_xml, ONLY : write_rho
+  USE xml_io_base, ONLY : write_rho
   USE iotk_module, ONLY : iotk_attlenx, iotk_free_unit, iotk_open_write, &
     iotk_write_begin, iotk_write_attr, iotk_write_empty, iotk_write_dat, &
     iotk_write_end, iotk_close_write
@@ -797,7 +791,7 @@ SUBROUTINE write_cd ( input_file_name, real_or_complex, output_dir_name )
     DO is = 1, ns
       IF ( real_or_complex .EQ. 1 ) THEN
         DO ig = 1, ng
-          rhog ( ig, is ) = CMPLX ( rhogr ( ig, is ), 0.0D0 )
+          rhog ( ig, is ) = CMPLX ( rhogr ( ig, is ), 0.0D0, KIND=dp )
         ENDDO
       ELSE
         DO ig = 1, ng
@@ -817,7 +811,7 @@ SUBROUTINE write_cd ( input_file_name, real_or_complex, output_dir_name )
   IF ( ionode ) THEN
     DO is = 1, ns
       DO ig = 1, ng
-        rhog ( ig, is ) = rhog ( ig, is ) / CMPLX ( omega, 0.0D0 )
+        rhog ( ig, is ) = rhog ( ig, is ) / CMPLX ( omega, 0.0D0, KIND=dp )
       ENDDO
     ENDDO
   ENDIF
@@ -899,7 +893,7 @@ SUBROUTINE write_cd ( input_file_name, real_or_complex, output_dir_name )
 
   DEALLOCATE ( gvec )
 
-  CALL write_rho ( rho%of_r, nspin )
+  CALL write_rho ( output_dir_name, rho%of_r, nspin )
 
   RETURN
 

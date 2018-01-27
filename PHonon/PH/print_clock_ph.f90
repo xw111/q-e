@@ -1,5 +1,5 @@
 !
-! Copyright (C) 2001 PWSCF group
+! Copyright (C) 2001-2016 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -10,10 +10,9 @@ subroutine print_clock_ph
   !-----------------------------------------------------------------------
 
   USE io_global,  ONLY : stdout
-  USE uspp, only: okvan
+  USE uspp,       ONLY : okvan, nlcc_any
   USE control_ph, ONLY : trans, zue, epsil
-  USE ramanm, ONLY: lraman, elop
-  USE nlcc_ph, ONLY: nlcc_any
+  USE ramanm,     ONLY : lraman, elop
   implicit none
   !
   WRITE( stdout, * )
@@ -104,7 +103,7 @@ subroutine print_clock_ph
   call print_clock ('mix_pot')
   call print_clock ('ef_shift')
   call print_clock ('localdos')
-#ifdef __MPI
+#if defined(__MPI)
   call print_clock ('psymdvscf')
 #else
   call print_clock ('symdvscf')
@@ -125,11 +124,11 @@ subroutine print_clock_ph
   WRITE( stdout, * )
   call print_clock ('ch_psi')
   call print_clock ('first')
-  call print_clock ('h_psiq')
+  call print_clock ('h_psi')
 
   call print_clock ('last')
   WRITE( stdout, * )
-  call print_clock ('h_psiq')
+  call print_clock ('h_psi')
   call print_clock ('firstfft')
   call print_clock ('product')
   call print_clock ('secondfft')

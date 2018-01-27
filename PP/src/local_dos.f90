@@ -24,21 +24,22 @@ SUBROUTINE local_dos (iflag, lsign, kpoint, kband, spin_component, &
   !                     0 for up+down dos,  1 for up dos, 2 for down dos
   !
   USE kinds,                ONLY : DP
-  USE cell_base,            ONLY : omega, tpiba2
+  USE cell_base,            ONLY : omega
   USE ions_base,            ONLY : nat, ntyp => nsp, ityp
   USE ener,                 ONLY : ef
   USE fft_base,             ONLY : dffts, dfftp
   USE fft_interfaces,       ONLY : fwfft, invfft
   USE gvect,                ONLY : nl, ngm, g
-  USE gvecs,              ONLY : nls, nlsm, doublegrid
-  USE klist,                ONLY : lgauss, degauss, ngauss, nks, wk, xk, nkstot
+  USE gvecs,                ONLY : nls, nlsm, doublegrid
+  USE klist,                ONLY : lgauss, degauss, ngauss, nks, wk, xk, &
+                                   nkstot, ngk, igk_k
   USE lsda_mod,             ONLY : lsda, nspin, current_spin, isk
   USE scf,                  ONLY : rho
-  USE symme,                ONLY : sym_rho, sym_rho_init
+  USE symme,                ONLY : sym_rho, sym_rho_init, sym_rho_deallocate
   USE uspp,                 ONLY : nkb, vkb, becsum, nhtol, nhtoj, indv
   USE uspp_param,           ONLY : upf, nh, nhm
   USE wavefunctions_module, ONLY : evc, psic, psic_nc
-  USE wvfct,                ONLY : nbnd, npwx, npw, igk, wg, et, g2kin, ecutwfc
+  USE wvfct,                ONLY : nbnd, npwx, wg, et
   USE control_flags,        ONLY : gamma_only
   USE noncollin_module,     ONLY : noncolin, npol
   USE spin_orb,             ONLY : lspinorb, fcoef
@@ -47,47 +48,47 @@ SUBROUTINE local_dos (iflag, lsign, kpoint, kband, spin_component, &
   USE mp,                   ONLY : mp_bcast, mp_sum
   USE mp_global,            ONLY : inter_pool_comm, intra_pool_comm
   USE becmod,               ONLY : calbec
-  USE control_flags,        ONLY : tqr
-  USE realus,               ONLY : addusdens_r
   IMPLICIT NONE
   !
   ! input variables
   !
   INTEGER, INTENT(in) :: iflag, kpoint, kband, spin_component
   LOGICAL, INTENT(in) :: lsign
-  real(DP), INTENT(in) :: emin, emax
+  REAL(DP), INTENT(in) :: emin, emax
   !
-  real(DP), INTENT(out) :: dos (dfftp%nnr)
+  REAL(DP), INTENT(out) :: dos (dfftp%nnr)
   !
   !    local variables
   !
-  INTEGER :: ikb, jkb, ijkb0, ih, jh, kh, na, ijh, np
   ! counters for US PPs
-  INTEGER :: ir, is, ig, ibnd, ik, irm, isup, isdw, ipol, kkb, is1, is2
+  INTEGER :: npw, ikb, jkb, ijkb0, ih, jh, kh, na, ijh, np
   ! counters
-  real(DP) :: w, w1, modulus
-  real(DP), ALLOCATABLE :: rbecp(:,:), segno(:), maxmod(:)
+  INTEGER :: ir, is, ig, ibnd, ik, irm, isup, isdw, ipol, kkb, is1, is2
+
+  REAL(DP) :: w, w1, modulus, wg_max
+  REAL(DP), ALLOCATABLE :: rbecp(:,:), segno(:), maxmod(:)
   COMPLEX(DP), ALLOCATABLE :: becp(:,:),  &
                                    becp_nc(:,:,:), be1(:,:), be2(:,:)
   INTEGER :: who_calculate, iproc
   COMPLEX(DP) :: phase
-  real(DP), EXTERNAL :: w0gauss, w1gauss
-  LOGICAL :: i_am_the_pool
-  INTEGER :: which_pool, kpoint_pool
+  REAL(DP), EXTERNAL :: w0gauss, w1gauss
+  INTEGER :: kpoint_pool
+  INTEGER, EXTERNAL :: local_kpoint_index
   !
   ! input checks
   !
   IF (noncolin.and. lsign) CALL errore('local_dos','not available',1)
-  IF (noncolin.and. gamma_only) CALL errore('local_dos','not available',1)
+  IF (noncolin.and. gamma_only) CALL errore('local_dos','not available',2)
   !
-  IF ( (iflag == 0) .and. ( kband < 1 .or. kband > nbnd ) ) &
+  IF ( iflag == 0 ) THEN
+     IF ( kband < 1 .or. kband > nbnd )  &
        CALL errore ('local_dos', 'wrong band specified', 1)
-  IF ( (iflag == 0) .and. ( kpoint < 1 .or. kpoint > nkstot ) ) &
+     IF ( kpoint < 1 .or. kpoint > nkstot ) &
        CALL errore ('local_dos', 'wrong kpoint specified', 1)
-  IF (lsign) THEN
-     IF (iflag /= 0) CALL errore ('local_dos', 'inconsistent flags', 1)
-     IF (sqrt(xk(1,kpoint)**2+xk(2,kpoint)**2+xk(3,kpoint)**2) > 1d-9 )  &
-        CALL errore ('local_dos', 'k must be zero', 1)
+     IF ( (sqrt(xk(1,kpoint)**2+xk(2,kpoint)**2+xk(3,kpoint)**2) > 1d-9 )  &
+          .AND. lsign ) CALL errore ('local_dos', 'k must be zero', 1)
+  ELSE
+     IF (lsign) CALL errore ('local_dos', 'inconsistent flags', 1)
   ENDIF
   !
   IF (gamma_only) THEN
@@ -111,16 +112,16 @@ SUBROUTINE local_dos (iflag, lsign, kpoint, kband, spin_component, &
   !   calculate the correct weights
   !
   IF (iflag /= 0.and. iflag /=3 .and. .not.lgauss) CALL errore ('local_dos', &
-       'gaussian broadening needed', 1)
+      'gaussian broadening needed', 1)
   IF (iflag == 2 .and. ngauss /= -99) CALL errore ('local_dos', &
-       ' beware: not using Fermi-Dirac function ',  - ngauss)
+      ' beware: not using Fermi-Dirac function ',  - ngauss)
   DO ik = 1, nks
      DO ibnd = 1, nbnd
         IF (iflag == 0) THEN
            wg (ibnd, ik) = 0.d0
         ELSEIF (iflag == 1) THEN
-           wg (ibnd, ik) = wk (ik) * w0gauss ( (ef - et (ibnd, ik) ) &
-                / degauss, ngauss) / degauss
+           !    Local density of states at energy emin with broadening emax
+           wg(ibnd,ik) = wk(ik) * w0gauss((emin - et(ibnd, ik))/emax, ngauss) / emax
         ELSEIF (iflag == 2) THEN
            wg (ibnd, ik) = - wk (ik) * w1gauss ( (ef - et (ibnd, ik) ) &
                 / degauss, ngauss)
@@ -135,28 +136,23 @@ SUBROUTINE local_dos (iflag, lsign, kpoint, kband, spin_component, &
         ENDIF
      ENDDO
   ENDDO
+  wg_max = MAXVAL(wg(:,:))
 
-  IF ( iflag == 0 .AND. npool > 1 ) THEN
-     CALL xk_pool( kpoint, nkstot, kpoint_pool,  which_pool )
-     IF ( kpoint_pool < 1 .or. kpoint_pool > nks ) &
-        CALL errore('local_dos','problems with xk_pool',1)
-     i_am_the_pool=(my_pool_id==which_pool)
-  ELSE
-     i_am_the_pool=.true.
-     kpoint_pool=kpoint
+  IF ( iflag == 0 ) THEN
+     ! returns -1 if kpoint is not on this pool
+     kpoint_pool = local_kpoint_index ( nkstot, kpoint )
+     IF ( kpoint_pool > 0)  wg (kband, kpoint_pool) = 1.d0
   ENDIF
-
-  IF (iflag == 0.and.i_am_the_pool) wg (kband, kpoint_pool) = 1.d0
   !
   !     here we sum for each k point the contribution
   !     of the wavefunctions to the density of states
   !
   DO ik = 1, nks
-     IF (ik == kpoint_pool .and.i_am_the_pool.or. iflag /= 0) THEN
+     IF ( iflag /= 0 .or. ik == kpoint_pool) THEN
         IF (lsda) current_spin = isk (ik)
-        CALL gk_sort (xk (1, ik), ngm, g, ecutwfc / tpiba2, npw, igk, g2kin)
         CALL davcio (evc, 2*nwordwfc, iunwfc, ik, - 1)
-        CALL init_us_2 (npw, igk, xk (1, ik), vkb)
+        npw = ngk(ik)
+        CALL init_us_2 (npw, igk_k(1,ik), xk (1, ik), vkb)
 
         IF (gamma_only) THEN
            CALL calbec ( npw, vkb, evc, rbecp )
@@ -169,12 +165,14 @@ SUBROUTINE local_dos (iflag, lsign, kpoint, kband, spin_component, &
      !     here we compute the density of states
      !
         DO ibnd = 1, nbnd
-           IF (ibnd == kband .or. iflag /= 0) THEN
+         ! Neglect summands with relative weights below machine epsilon
+         IF ( wg(ibnd, ik) > epsilon(0.0_DP) * wg_max .and. &
+             (ibnd == kband .or. iflag /= 0)) THEN
               IF (noncolin) THEN
                  psic_nc = (0.d0,0.d0)
                  DO ig = 1, npw
-                    psic_nc(nls(igk(ig)),1)=evc(ig     ,ibnd)
-                    psic_nc(nls(igk(ig)),2)=evc(ig+npwx,ibnd)
+                    psic_nc(nls(igk_k(ig,ik)),1)=evc(ig     ,ibnd)
+                    psic_nc(nls(igk_k(ig,ik)),2)=evc(ig+npwx,ibnd)
                  ENDDO
                  DO ipol=1,npol
                     CALL invfft ('Wave', psic_nc(:,ipol), dffts)
@@ -182,11 +180,11 @@ SUBROUTINE local_dos (iflag, lsign, kpoint, kband, spin_component, &
               ELSE
                  psic(1:dffts%nnr) = (0.d0,0.d0)
                  DO ig = 1, npw
-                    psic (nls (igk (ig) ) ) = evc (ig, ibnd)
+                    psic (nls (igk_k(ig,ik) ) ) = evc (ig, ibnd)
                  ENDDO
                  IF (gamma_only) THEN
                     DO ig = 1, npw
-                       psic (nlsm(igk (ig) ) ) = conjg(evc (ig, ibnd))
+                       psic (nlsm(igk_k (ig,ik) ) ) = conjg(evc (ig, ibnd))
                     ENDDO
                  ENDIF
                  CALL invfft ('Wave', psic, dffts)
@@ -211,7 +209,7 @@ SUBROUTINE local_dos (iflag, lsign, kpoint, kband, spin_component, &
                        ENDIF
                     ENDDO
                     who_calculate=1
-#ifdef __MPI
+#if defined(__MPI)
                     CALL mp_sum(maxmod,intra_pool_comm)
                     DO iproc=2,nproc_pool
                        IF (maxmod(iproc)>maxmod(who_calculate)) &
@@ -223,7 +221,7 @@ SUBROUTINE local_dos (iflag, lsign, kpoint, kband, spin_component, &
                     IF (me_pool+1==who_calculate) &
                           phase = psic(irm)/maxmod(who_calculate)
                     DEALLOCATE(maxmod)
-#ifdef __MPI
+#if defined(__MPI)
                     CALL mp_bcast(phase,who_calculate-1,intra_pool_comm)
 #endif
                     segno(1:dffts%nnr) = dble( psic(1:dffts%nnr)*conjg(phase) )
@@ -351,9 +349,10 @@ SUBROUTINE local_dos (iflag, lsign, kpoint, kband, spin_component, &
                 ENDIF
               ENDDO
            ENDIF
-        ENDDO
-     ENDIF
-  ENDDO
+        ENDDO ! loop over bands
+    ENDIF 
+  ENDDO ! loop over k-points
+
   IF (gamma_only) THEN
      DEALLOCATE(rbecp)
   ELSE
@@ -379,13 +378,7 @@ SUBROUTINE local_dos (iflag, lsign, kpoint, kband, spin_component, &
   !
   !    Here we add the US contribution to the charge
   !
-  if ( tqr ) then
-   CALL addusdens_r(rho%of_r(:,:),.false.)
-  else
-  !
   CALL addusdens(rho%of_r(:,:))
-  !
-  endif 
   !
   IF (nspin == 1 .or. nspin==4) THEN
      is = 1
@@ -403,7 +396,7 @@ SUBROUTINE local_dos (iflag, lsign, kpoint, kband, spin_component, &
      dos(:) = dos(:) * segno(:)
      DEALLOCATE(segno)
   ENDIF
-#ifdef __MPI
+#if defined(__MPI)
   CALL mp_sum( dos, inter_pool_comm )
 #endif
 
@@ -411,7 +404,7 @@ SUBROUTINE local_dos (iflag, lsign, kpoint, kband, spin_component, &
   !
   !    symmetrization of the local dos
   !
-  CALL sym_rho_init ( gamma_only )
+  CALL sym_rho_init (gamma_only )
   !
   psic(:) = cmplx ( dos(:), 0.0_dp, kind=dp)
   CALL fwfft ('Dense', psic, dfftp)
@@ -424,57 +417,8 @@ SUBROUTINE local_dos (iflag, lsign, kpoint, kband, spin_component, &
   CALL invfft ('Dense', psic, dfftp)
   dos(:) = dble(psic(:))
   !
+  CALL sym_rho_deallocate()
+  !
   RETURN
 
 END SUBROUTINE local_dos
-
-!------------------------------------------------------------------------
-SUBROUTINE xk_pool( ik, nkstot, ik_pool,  which_pool )
-!------------------------------------------------------------------------
-!
-!  This routine is a simplified version of set_kpoint_vars in
-!  xml_io_files. It recieves the index ik of a k_point in the complete
-!  k point list and return the index within the pool ik_pool, and
-!  the number of the pool that has that k point.
-!
-!
-USE mp_global,  ONLY : npool, kunit
-!
-IMPLICIT NONE
-
-INTEGER, INTENT(in)  :: ik, nkstot
-INTEGER, INTENT(out) :: ik_pool, which_pool
-!
-INTEGER :: nkl, nkr, nkbl
-!
-!
-IF (npool==1) THEN
-   which_pool=1
-   ik_pool=ik
-   RETURN
-ENDIF
-!
-! ... find out number of k points blocks
-!
-nkbl = nkstot / kunit
-!
-! ... k points per pool
-!
-nkl = kunit * ( nkbl / npool )
-!
-! ... find out the reminder
-!
-nkr = ( nkstot - nkl * npool ) / kunit
-!
-! ... calculate the pool and the index within the pool
-!
-IF (ik<=nkr*(nkl+1)) THEN
-   which_pool=(ik-1)/(nkl+1)
-   ik_pool=ik-which_pool*(nkl+1)
-ELSE
-   which_pool=nkr+(ik-nkr*(nkl+1)-1)/nkl
-   ik_pool=ik-nkr*(nkl+1)-(which_pool-nkr)*nkl
-ENDIF
-
-RETURN
-END SUBROUTINE xk_pool

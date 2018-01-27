@@ -14,8 +14,8 @@
       !
       USE kinds,              ONLY: DP
       USE orthogonalize_base, ONLY: rhoset, sigset, tauset, ortho_iterate,   &
-                                    ortho_alt_iterate, diagonalize_serial,   &
-                                    use_parallel_diag, diagonalize_parallel
+                                    ortho_alt_iterate, use_parallel_diag
+      USE dspev_module,       ONLY: diagonalize_serial, diagonalize_parallel
       USE descriptors,        ONLY: la_descriptor
       USE mp_global,          ONLY: nproc_bgrp, me_bgrp, intra_bgrp_comm, my_bgrp_id, inter_bgrp_comm, nbgrp
       USE mp,                 ONLY: mp_sum, mp_bcast
@@ -43,6 +43,7 @@
       !
       ! ...   Subroutine body
       !
+
       IF( descla%active_node > 0 ) THEN
          !
          IF( nx0 /= descla%nrcx ) &
@@ -279,7 +280,7 @@
       !
       USE kinds,          ONLY: DP
       USE ions_base,      ONLY: na, nat
-      USE uspp,           ONLY: nkb, qq
+      USE uspp,           ONLY: nkb, qq_nt
       USE uspp_param,     ONLY: nh, ish, nvb
       USE electrons_base, ONLY: f, nbsp_bgrp, iupdwn_bgrp, nupdwn_bgrp, i2gupdwn_bgrp, nbsp, nspin, nupdwn, iupdwn
       USE gvecw,          ONLY: ngw
@@ -363,7 +364,7 @@
             inl = ish(is)+(iv-1)*na(is)
             DO jv=1,nh(is)
                jnl = ish(is)+(jv-1)*na(is)
-               qqf = qq(iv,jv,is)
+               qqf = qq_nt(iv,jv,is)
                IF( ABS( qqf ) > 1.D-5 ) THEN
                   DO iss = 1, nspin
                      IF( descla( iss )%active_node > 0 ) THEN
@@ -395,7 +396,7 @@
             inl = ish(is)+(iv-1)*na(is)
             DO jv=1,nh(is)
                jnl = ish(is)+(jv-1)*na(is)
-               qqf = qq(iv,jv,is)
+               qqf = qq_nt(iv,jv,is)
                IF( ABS( qqf ) > 1.D-5 ) THEN
                   DO iss = 1, nspin
                      IF( descla( iss )%active_node > 0 ) THEN

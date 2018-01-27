@@ -16,8 +16,7 @@ MODULE ph_restart
   USE iotk_module
   !
   USE kinds,     ONLY : DP
-  USE io_files,  ONLY : prefix, xmlpun, xmlpun_base, &
-                        qexml_version, qexml_version_init
+  USE io_files,  ONLY : prefix, xmlpun, qexml_version, qexml_version_init
   USE control_ph, ONLY : tmp_dir_ph
   USE io_global, ONLY : ionode, ionode_id
   USE mp_images, ONLY : intra_image_comm
@@ -223,8 +222,9 @@ MODULE ph_restart
          END SUBROUTINE write_tensors
 
          SUBROUTINE write_modes(iq)
-            USE modes, ONLY : nirr, npert, u, nsymq, minus_q, &
-                                           name_rap_mode, num_rap_mode
+            USE modes, ONLY : nirr, npert, u, name_rap_mode, num_rap_mode
+
+            USE lr_symm_base, ONLY : nsymq, minus_q
 
             IMPLICIT NONE
             INTEGER :: imode0, imode, irr, ipert, iq
@@ -299,7 +299,7 @@ MODULE ph_restart
            USE klist, ONLY : nks
            USE wvfct, ONLY: nbnd
            USE qpoint, ONLY : nksqtot, xk_col
-           USE control_ph, ONLY : lgamma
+           USE control_lr, ONLY : lgamma
            IMPLICIT NONE
            INTEGER, INTENT(IN) :: irr
            INTEGER :: ik, ikk
@@ -831,10 +831,11 @@ MODULE ph_restart
 !
 !   This routine reads the displacement patterns.
 !
-    USE modes, ONLY : nirr, npert, nsymq, u, minus_q, name_rap_mode, &
-                      num_rap_mode
+    USE modes, ONLY : nirr, npert, u, name_rap_mode, num_rap_mode
     USE el_phon, ONLY : elph 
     USE control_ph, ONLY : trans, zeu
+
+    USE lr_symm_base, ONLY : nsymq, minus_q
 
     IMPLICIT NONE
 
@@ -1047,7 +1048,7 @@ MODULE ph_restart
                      TRIM(int_to_char(iq)) // '.' 
 
            DO irr=0,irr_iq(iq)
-              IF (comp_irr_iq(irr,iq).OR..NOT.low_directory_check) THEN
+              IF (comp_irr_iq(irr,iq).AND..NOT.low_directory_check) THEN
                  filename1=TRIM(filename) // TRIM(int_to_char(irr)) // '.xml'
                  INQUIRE(FILE=TRIM(filename1), EXIST=exst)
                  IF (.NOT.exst) CYCLE
@@ -1153,7 +1154,11 @@ MODULE ph_restart
            tmp_dir=tmp_dir_ph
         ENDIF
         !
+#if defined (__OLDXML)
         filename=TRIM(dirname) // '/data-file.xml'
+#else
+        filename=TRIM(dirname) // '/data-file-schema.xml'
+#endif
         !
         IF (ionode) inquire (file =TRIM(filename), exist = exst)
         !
@@ -1298,9 +1303,12 @@ MODULE ph_restart
       !
       ! ... create the main restart directory
       !
-      IF (ionode) inquire (file =TRIM(dirname)//'/data-file.xml', &
-                           exist = exst)
-      !
+      IF (ionode) inquire (file = & 
+#if defined (__OLDXML)
+        & TRIM(dirname) // '/data-file.xml',        exist = exst)
+#else
+        & TRIM(dirname) // '/data-file-schema.xml', exist = exst)
+#endif
       CALL mp_bcast( exst, ionode_id, intra_image_comm )
       !
       IF (.NOT. exst) CALL create_directory( dirname )

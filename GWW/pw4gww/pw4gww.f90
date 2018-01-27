@@ -54,12 +54,13 @@ program gwl_punch
   !    
 
   USE kinds,     ONLY : i4b
-  USE gvect,  ONLY : mill
+  USE gvecs,     ONLY : doublegrid
+  USE gvect,     ONLY : mill
   use pwcom
-  USE constants,            ONLY : rytoev
+  USE constants, ONLY : rytoev
   use io_global, ONLY : stdout, ionode, ionode_id
   use io_files,  ONLY : psfile, pseudo_dir
-  use io_files,  ONLY : prefix, tmp_dir, outdir
+  use io_files,  ONLY : prefix, tmp_dir
   use ions_base, ONLY : ntype => nsp
   use iotk_module
   use mp_pools, ONLY : kunit
@@ -163,6 +164,7 @@ program gwl_punch
   logical :: found, uspp_spsi, ascii, single_file, raw
 !  INTEGER(i4b), EXTERNAL :: C_MKDIR
  CHARACTER(LEN=256), EXTERNAL :: trimcheck
+ CHARACTER(LEN=256) :: outdir
 
   NAMELIST /inputpw4gww/ prefix, outdir, pp_file, uspp_spsi, ascii, single_file, raw, &
                      psfile, pseudo_dir, &
@@ -307,7 +309,7 @@ program gwl_punch
 !      ENDIF
       !
   ENDIF
-#ifndef __MPI
+#if !defined(__MPI)
   dual_pb=4.d0
   dual_vs=4.d0
   dual_vt=4.d0
@@ -316,7 +318,6 @@ program gwl_punch
   ! ... Broadcasting variables
 !------------------------------------------------------------------------
   tmp_dir = trimcheck( outdir )
-  CALL mp_bcast( outdir, ionode_id, world_comm )
   CALL mp_bcast( tmp_dir, ionode_id, world_comm )
   CALL mp_bcast( prefix, ionode_id, world_comm )
   CALL mp_bcast( pp_file, ionode_id, world_comm )
@@ -431,7 +432,7 @@ program gwl_punch
   call summary()
 
 !
-! init some quantities igk,....
+! init some quantities ...
 !
   CALL hinit0()
 !
@@ -516,6 +517,8 @@ subroutine read_export (pp_file,kunit,uspp_spsi, ascii, single_file, raw)
 
   use kinds,          ONLY : DP 
   use pwcom  
+  USE gvect,          ONLY : ngm, ngm_g, mill, ig_l2g, g
+  use gvecw,          ONLY : gcutw
   use control_flags,  ONLY : gamma_only  
   use becmod,         ONLY : bec_type, becp, calbec, &
                              allocate_bec_type, deallocate_bec_type
@@ -525,10 +528,11 @@ subroutine read_export (pp_file,kunit,uspp_spsi, ascii, single_file, raw)
 ! occhio sname is in symme which is now outside pwcom
   use  uspp,          ONLY : nkb, vkb
   use wavefunctions_module,  ONLY : evc
-  use io_files,       ONLY : nd_nmbr, outdir, prefix, iunwfc, nwordwfc, iunsat, nwordatwfc
+  use io_files,       ONLY : nd_nmbr, prefix, iunwfc, nwordwfc, iunsat, nwordatwfc
   use io_files,       ONLY : pseudo_dir, psfile
   use io_global,      ONLY : ionode, stdout
   USE ions_base,      ONLY : atm, nat, ityp, tau, nsp
+  use cell_base,      ONLY : bg
   use mp_pools,       ONLY : nproc_pool, my_pool_id, intra_pool_comm, &
                              inter_pool_comm
   use mp,             ONLY : mp_sum, mp_max
@@ -548,8 +552,7 @@ subroutine read_export (pp_file,kunit,uspp_spsi, ascii, single_file, raw)
   integer :: i, j, k, ig, ik, ibnd, na, ngg,ig_, ierr
   integer, allocatable :: kisort(:)
   real(DP) :: xyz(3), tmp(3)
-  integer :: npool, nkbl, nkl, nkr, npwx_g
-  integer :: ike, iks, npw_g, ispin, local_pw
+  integer :: ike, iks, npw_g, npwx_g, ispin, local_pw
   integer, allocatable :: ngk_g( : )
   integer, allocatable :: itmp_g( :, : )
   real(DP),allocatable :: rtmp_g( :, : )
@@ -558,7 +561,7 @@ subroutine read_export (pp_file,kunit,uspp_spsi, ascii, single_file, raw)
   integer, allocatable :: igwk( :, : )
   integer, allocatable :: l2g_new( : )
   integer, allocatable :: igk_l2g( :, : )
-
+  integer, external :: global_kpoint_index
 
   real(DP) :: wfc_scal 
   logical :: twf0, twfm
@@ -575,28 +578,9 @@ subroutine read_export (pp_file,kunit,uspp_spsi, ascii, single_file, raw)
      IF( ( nproc_pool > nproc ) .OR. ( MOD( nproc, nproc_pool ) /= 0 ) ) &
        CALL errore( ' write_export ',' nproc_pool ', 1 )
 
-     !  find out the number of pools
-     npool = nproc / nproc_pool
-
-     !  find out number of k points blocks
-     nkbl = nkstot / kunit
-
-     !  k points per pool
-     nkl = kunit * ( nkbl / npool )
-
-     !  find out the reminder
-     nkr = ( nkstot - nkl * npool ) / kunit
-
-     !  Assign the reminder to the first nkr pools
-     IF( my_pool_id < nkr ) nkl = nkl + kunit
-
-     !  find out the index of the first k point in this pool
-     iks = nkl * my_pool_id + 1
-     IF( my_pool_id >= nkr ) iks = iks + nkr * kunit
-
-     !  find out the index of the last k point in this pool
-     ike = iks + nkl - 1
-
+     iks = global_kpoint_index (nkstot, 1)
+     ike = iks + nks - 1
+     
   END IF
 
   write(stdout,*) "after first init"
@@ -638,7 +622,7 @@ subroutine read_export (pp_file,kunit,uspp_spsi, ascii, single_file, raw)
   do ik = 1, nks
      kisort = 0
      npw = npwx
-     call gk_sort (xk (1, ik+iks-1), ngm, g, ecutwfc / tpiba2, npw, kisort(1), g2kin)
+     call gk_sort (xk (1, ik+iks-1), ngm, g, gcutw, npw, kisort(1), g2kin)
      !
      ! mapping between local and global G vector index, for this kpoint
      !
@@ -709,7 +693,7 @@ subroutine read_export (pp_file,kunit,uspp_spsi, ascii, single_file, raw)
   
   write(stdout,*)"after wfc waves"
 
-#ifdef __MPI
+#if defined(__MPI)
   call poolrecover (et, nbnd, nkstot, nks)
 #endif
  
@@ -769,10 +753,8 @@ subroutine read_export (pp_file,kunit,uspp_spsi, ascii, single_file, raw)
            local_pw = 0
            IF( (ik >= iks) .AND. (ik <= ike) ) THEN
                
-               CALL gk_sort (xk (1, ik+iks-1), ngm, g, ecutwfc / tpiba2, npw, igk, g2kin)
                CALL davcio (evc, 2*nwordwfc, iunwfc, (ik-iks+1), - 1)
-
-               CALL init_us_2(npw, igk, xk(1, ik), vkb)
+               CALL init_us_2(npw, igk_k(1,ik-iks+1), xk(1, ik), vkb)
                local_pw = ngk(ik-iks+1)
                             
                IF ( gamma_only ) THEN

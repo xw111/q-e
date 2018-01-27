@@ -49,7 +49,6 @@ CONTAINS
     use gvect,           ONLY : ngm, nl, g, nlm
     USE fft_base,        ONLY : dfftp
     USE cell_base,       ONLY : omega, tpiba
-    USE fft_scalar,      ONLY : cfft3d
     !! -------------------------------------------------------------------------
     
     !! Local variables
@@ -101,18 +100,15 @@ CONTAINS
       
        if (ionode .and. iverbosity > -1 ) then
 
-          
-          write(*,'(/ /A )') "---------------------------------------------------------------------------------"
-          write(*,'(A /)') "Carrying out rVV10 run using the following parameters:"
-          
-          write(*,'(A,I6,A,I6,A,F8.3)') "Nqs =  ",Nqs, "    Nr_points =  ", Nr_points,"   r_max =  ",r_max
-          write(*, '(A, F8.5)') "b_value = ", b_value         
-          write(*, '(A, F8.5)') "beta = ", beta        
-          write(*,'(A)',advance='no') "q_mesh =  "
-          write(*,'(F15.8)') (q_mesh(I), I=1, Nqs)
+          WRITE(stdout,'(/ /A )') "---------------------------------------------------------------------------------"
+          WRITE(stdout,'(A)') "Carrying out rVV10 run using the following parameters:"
+          WRITE(stdout,'(A,I6,A,I6,A,F8.3)') "Nqs =  ",Nqs, "    Nr_points =  ", Nr_points,"   r_max =  ",r_max
+          WRITE(stdout, '(A, F8.5, A, F8.5 )') "b_value = ", b_value, "    beta = ", beta        
+          WRITE(stdout,'(5X,"q_mesh =",4F12.8)') (q_mesh(I), I=1, 4)
+          WRITE(stdout,'(13X,4F12.8)') (q_mesh(I), I=5, Nqs)
                  
-          write(*,'(/ A )') "Gradients computed in Reciprocal space"
-          write(*,'(/ A / /)') "---------------------------------------------------------------------------------"
+          WRITE(stdout,'(/ A )') "Gradients computed in Reciprocal space"
+          WRITE(stdout,'(/ A / /)') "---------------------------------------------------------------------------------"
 
           
        end if
@@ -343,7 +339,6 @@ CONTAINS
                                         gl, ngl, gstart
       USE fft_base,              ONLY : dfftp
       USE cell_base,             ONLY : omega, tpiba, alat, at, tpiba2
-      USE fft_scalar,            ONLY : cfft3d
 
       !! ----------------------------------------------------------------------------------
 

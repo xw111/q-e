@@ -1,5 +1,5 @@
 !
-! Copyright (C) 2001-2007 Quantum ESPRESSO group
+! Copyright (C) 2001-2016 Quantum ESPRESSO group
 ! This file is distributed under the terms of the
 ! GNU General Public License. See the file `License'
 ! in the root directory of the present distribution,
@@ -8,7 +8,7 @@
 !---------------------------------------------------------------------
 subroutine set_drhoc (q,drc)
   !---------------------------------------------------------------------
-  ! calculate the fourier trasform of the core charge for all pseudo
+  ! calculate the fourier transform of the core charge for all pseudo
   ! without structure factor and put it in drc, at q point
   ! used to calculate derivatives of the core charge
   !
@@ -19,7 +19,7 @@ subroutine set_drhoc (q,drc)
   USE ions_base, ONLY : ntyp => nsp
   USE atom,      ONLY : msh, rgrid
   USE uspp_param,ONLY : upf
-  USE nlcc_ph,   ONLY : nlcc_any
+  USE uspp,      ONLY : nlcc_any
   !
   IMPLICIT NONE
   ! input/output

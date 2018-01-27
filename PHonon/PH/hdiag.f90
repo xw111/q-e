@@ -7,29 +7,26 @@
 !
 !
 !-----------------------------------------------------------------------
-subroutine hdiag( max_iter, avg_iter, xk_, et_ )
+subroutine hdiag( npw, max_iter, avg_iter, et_ )
   !
   ! Diagonalizes the unperturbed Hamiltonian in a non-selfconsistent way
   ! by Conjugate Gradient (band-by-band)
   !
   USE kinds,     ONLY : DP
-  USE cell_base, ONLY: tpiba2
   USE gvect,     ONLY: g, gstart
-  USE wvfct,     ONLY: g2kin, igk, nbnd, npwx, npw
+  USE wvfct,     ONLY: g2kin, nbnd, npwx
   USE uspp,      ONLY: vkb, okvan
   USE noncollin_module,    ONLY: npol
   USE wavefunctions_module,ONLY: evc
   USE ramanm,    ONLY: eth_ns
   implicit none
-
   !
   !     I/O variables:
   !
-  integer :: max_iter
+  integer :: npw, max_iter
   ! maximum number of iterations
-  real(DP) :: avg_iter, xk_(3), et_(nbnd)
+  real(DP) :: avg_iter, et_(nbnd)
   ! iteration number in the diagonalization
-  ! k-point
   ! eigenvalues of the diagonalization
   !
   !     Local variables:
@@ -44,23 +41,18 @@ subroutine hdiag( max_iter, avg_iter, xk_, et_ )
     ! type of band: valence (1) or conduction (0)
   REAl(DP), ALLOCATABLE :: h_prec(:)
     ! preconditioning matrix (diagonal)
+! CG diagonalization uses these external routines on a single band
+   external h_1psi, s_1psi
+!  subroutine h_1psi(npwx,npw,psi,hpsi,spsi)  computes H*psi and S*psi
+!  subroutine s_1psi(npwx,npw,psi,spsi)  computes S*psi (if needed)
 
   call start_clock ('hdiag')
 
   allocate (h_prec( npwx), btype(nbnd))
-  btype(:) = 1
   !
   !   various initializations
   !
-  call init_us_2 (npw, igk, xk_, vkb)
-  !
-  !    sets the kinetic energy
-  !
-  do ig = 1, npw
-     g2kin (ig) =((xk_ (1) + g (1, igk (ig) ) ) **2 + &
-                  (xk_ (2) + g (2, igk (ig) ) ) **2 + &
-                  (xk_ (3) + g (3, igk (ig) ) ) **2 ) * tpiba2
-  enddo
+  btype(:) = 1
   !
   ! Conjugate-Gradient diagonalization
   !
@@ -75,7 +67,8 @@ subroutine hdiag( max_iter, avg_iter, xk_, et_ )
        ( npwx, npw, nbnd, gstart, nbnd, evc, npol, okvan, evc, et_ )
      avg_iter = avg_iter + 1.d0
   endif
-  call ccgdiagg (npwx, npw, nbnd, npol, evc, et_, btype, h_prec, eth_ns, &
+  CALL ccgdiagg( h_1psi, s_1psi, h_prec, &
+       npwx, npw, nbnd, npol, evc, et_, btype, eth_ns, &
        max_iter, .true., notconv, cg_iter)
   avg_iter = avg_iter + cg_iter
   ntry = ntry + 1

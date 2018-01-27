@@ -13,12 +13,13 @@ SUBROUTINE init_run()
   USE symme,              ONLY : sym_rho_init
   USE wvfct,              ONLY : nbnd, et, wg, btype
   USE control_flags,      ONLY : lmd, gamma_only, smallmem, ts_vdw
+  USE gvect,              ONLY : gstart ! to be comunicated to the Solvers if gamma_only
   USE cell_base,          ONLY : at, bg, set_h_ainv
   USE cellmd,             ONLY : lmovecell
   USE dynamics_module,    ONLY : allocate_dyn_vars
   USE paw_variables,      ONLY : okpaw
   USE paw_init,           ONLY : paw_init_onecenter, allocate_paw_internals
-#ifdef __MPI
+#if defined(__MPI)
   USE paw_init,           ONLY : paw_post_init
 #endif
   USE bp,                 ONLY : allocate_bp_efield, bp_global_map
@@ -28,8 +29,14 @@ SUBROUTINE init_run()
   USE wannier_new,        ONLY : use_wannier    
   USE dfunct,             ONLY : newd
   USE esm,                ONLY : do_comp_esm, esm_init
-  USE mp_bands,           ONLY : intra_bgrp_comm
+  USE mp_bands,           ONLY : intra_bgrp_comm, inter_bgrp_comm, nbgrp, root_bgrp_id
+  USE mp,                 ONLY : mp_bcast
   USE tsvdw_module,       ONLY : tsvdw_initialize
+  USE Coul_cut_2D,        ONLY : do_cutoff_2D, cutoff_fact 
+  USE wavefunctions_module, ONLY : evc
+#if defined(__HDF5) && defined(__OLDXML)
+  USE hdf5_qe, ONLY : initialize_hdf5
+#endif
   !
   IMPLICIT NONE
   !
@@ -40,12 +47,18 @@ SUBROUTINE init_run()
   !
   CALL pre_init()
   !
+  ! ... determine the data structure for fft arrays
+  !
+  CALL data_structure( gamma_only )
+  !
+  ! ... print a summary and a memory estimate before starting allocating
+  !
+  CALL summary()
+  CALL memory_report()
+  !
   ! ... allocate memory for G- and R-space fft arrays
   !
   CALL allocate_fft()
-  !
-  IF ( dft_is_hybrid() .AND. dffts%have_task_groups ) &
-     CALL errore ('init_run', '-ntg option incompatible with EXX',1)
   !
   ! ... generate reciprocal-lattice vectors and fft indices
   !
@@ -54,15 +67,22 @@ SUBROUTINE init_run()
   ELSE
      CALL ggen( gamma_only, at, bg )
   END IF
+  if (gamma_only) THEN
+     ! ... Solvers need to know gstart
+     call export_gstart_2_cg(gstart); call export_gstart_2_davidson(gstart)
+  END IF
   !
   IF (do_comp_esm) CALL esm_init()
+  !
+  ! ... setup the 2D cutoff factor
+  !
+  IF (do_cutoff_2D) CALL cutoff_fact()
+  !
   CALL gshells ( lmovecell )
   !
   ! ... variable initialization for parallel symmetrization
   !
   CALL sym_rho_init (gamma_only )
-  !
-  CALL summary()
   !
   ! ... allocate memory for all other arrays (potentials, wavefunctions etc)
   !
@@ -77,8 +97,6 @@ SUBROUTINE init_run()
   CALL bp_global_map()
   !
   call plugin_initbase()
-  !
-  CALL memory_report()
   !
   ALLOCATE( et( nbnd, nkstot ) , wg( nbnd, nkstot ), btype( nbnd, nkstot ) )
   !
@@ -99,17 +117,25 @@ SUBROUTINE init_run()
   CALL potinit()
   !
   CALL newd()
+#if defined(__HDF5) && defined(__OLDXML)
+  ! calls h5open_f mandatory in any application using hdf5
+  CALL initialize_hdf5()
+#endif 
   !
   CALL wfcinit()
   !
   IF(use_wannier) CALL wannier_init()
   !
-#ifdef __MPI
+#if defined(__MPI)
   ! Cleanup PAW arrays that are only used for init
   IF (okpaw) CALL paw_post_init() ! only parallel!
 #endif
   !
   IF ( lmd ) CALL allocate_dyn_vars()
+  IF( nbgrp > 1 ) THEN
+     ! FIXME: this should be in wfcinit, not here
+     CALL mp_bcast( evc, root_bgrp_id, inter_bgrp_comm )
+  ENDIF
   !
   CALL stop_clock( 'init_run' )
   !

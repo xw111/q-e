@@ -114,7 +114,7 @@ CONTAINS
   do na=1,nat
      do ig=1,ngm
         arg = tpi * SUM ( g(:,ig)*tau(:, na) ) 
-        force(:,na) = force(:,na) + g(:,ig) * CMPLX(SIN(arg),-COS(ARG)) * v(ig)
+        force(:,na) = force(:,na) + g(:,ig) * CMPLX(SIN(arg),-COS(ARG), KIND=dp) * v(ig)
      end do
      force(:,na) = - force(:,na) * zv(ityp(na))  * tpiba
   end do
@@ -134,7 +134,7 @@ CONTAINS
   USE gvect,         ONLY : ngm, gg, gstart_ => gstart, nl, nlm, ecutrho
   USE cell_base,     ONLY : at, alat, tpiba2, omega
 
-  INTEGER :: idx0, idx, ir, i,j,k, ig, nt
+  INTEGER :: idx, ir, i,j,k, j0, k0, ig, nt
   REAL(DP) :: r(3), rws, upperbound, rws2
   COMPLEX (DP), ALLOCATABLE :: aux(:)
   REAL(DP), EXTERNAL :: qe_erfc
@@ -166,22 +166,25 @@ CONTAINS
   gstart = gstart_
   gamma_only = gamma_only_
   !
-  ! idx0 = starting index of real-space FFT arrays for this processor
-  !
-  idx0 = dfftp%nr1x*dfftp%nr2x * dfftp%ipp(me_bgrp+1)
-  !
   ALLOCATE (aux(dfftp%nnr))
-  aux = CMPLX(0._dp,0._dp)
-  DO ir = 1, dfftp%nr1x*dfftp%nr2x * dfftp%npl
+  aux = (0._dp,0._dp)
+  j0 = dfftp%my_i0r2p ; k0 = dfftp%my_i0r3p
+  DO ir = 1, dfftp%nr1x*dfftp%my_nr2p*dfftp%my_nr3p
      !
-     ! ... three dimensional indices
+     ! ... three dimensional indexes
      !
-     idx = idx0 + ir - 1
-     k   = idx / (dfftp%nr1x*dfftp%nr2x)
-     idx = idx - (dfftp%nr1x*dfftp%nr2x)*k
+     idx = ir -1
+     k   = idx / (dfftp%nr1x*dfftp%my_nr2p)
+     idx = idx - (dfftp%nr1x*dfftp%my_nr2p)*k
+     k   = k + k0
      j   = idx / dfftp%nr1x
-     idx = idx - dfftp%nr1x*j
+     idx = idx - dfftp%nr1x * j
+     j   = j + j0
      i   = idx
+
+     ! ... do not include points outside the physical range
+
+     IF ( i >= dfftp%nr1 .OR. j >= dfftp%nr2 .OR. k >= dfftp%nr3 ) CYCLE
 
      r(:) = ( at(:,1)/dfftp%nr1*i + at(:,2)/dfftp%nr2*j + at(:,3)/dfftp%nr3*k )
 
@@ -220,7 +223,7 @@ CONTAINS
      call  write_wg_on_file(filplot, plot)
 
      filplot = 'wg_corr_g'
-     aux(:) = CMPLX(0._dp,0._dp)
+     aux(:) = (0._dp,0._dp)
      do ig =1, ngm
         aux(nl(ig))  = smooth_coulomb_g( tpiba2*gg(ig))/omega
      end do
@@ -231,7 +234,7 @@ CONTAINS
      call  write_wg_on_file(filplot, plot)
 
      filplot = 'wg_corr_diff'
-     aux(:) = CMPLX(0._dp,0._dp)
+     aux(:) = (0._dp,0._dp)
      aux(nl(1:ngm)) = wg_corr(1:ngm) / omega
      if (gamma_only) then
         aux(:) = 0.5_dp * aux(:) 
@@ -257,8 +260,8 @@ CONTAINS
 !----------------------------------------------------------------------------
   USE fft_base,        ONLY : dfftp
   USE gvect,           ONLY : gcutm
-  USE wvfct,           ONLY : ecutwfc
-  USE gvecs,         ONLY : dual
+  USE gvecw,           ONLY : ecutwfc
+  USE gvecs,           ONLY : dual
   USE cell_base,       ONLY : at, alat, tpiba2, omega, ibrav, celldm
   USE ions_base,       ONLY : zv, ntyp => nsp, nat, ityp, atm, tau
   CHARACTER (LEN=25), INTENT(IN) :: filplot
@@ -266,9 +269,9 @@ CONTAINS
   CHARACTER (LEN=25) :: title
   INTEGER :: plot_num=0, iflag=+1
 
-  CALL plot_io (filplot, title, dfftp%nr1x, dfftp%nr2x, dfftp%nr3x, dfftp%nr1, dfftp%nr2, &
-     dfftp%nr3, nat, ntyp, ibrav, celldm, at, gcutm, dual, ecutwfc, plot_num, atm, &
-     ityp, zv, tau, plot, iflag)
+  CALL plot_io (filplot, title, dfftp%nr1x, dfftp%nr2x, dfftp%nr3x, &
+     dfftp%nr1, dfftp%nr2, dfftp%nr3, nat, ntyp, ibrav, celldm, at, &
+     gcutm, dual, ecutwfc, plot_num, atm, ityp, zv, tau, plot, iflag)
   RETURN
   END SUBROUTINE write_wg_on_file
 !----------------------------------------------------------------------------
