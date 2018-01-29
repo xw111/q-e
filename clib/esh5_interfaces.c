@@ -23,9 +23,10 @@
 #include <sys/types.h>
 #include <math.h>
 #include <assert.h>
-#include "c_defs.h"
 #include "hdf5.h"
 #include "hdf5_hl.h"
+
+#define F77_FUNC_(name,NAME) name ## _
 
 /* file handler */
 static hid_t h_file=-1;
@@ -252,18 +253,18 @@ void F77_FUNC_(esh5_open_electrons_base,ESH5_OPEN_ELECTRONS_BASE)
 //     create kpoint/spin/state groups
     for(int ik=0; ik<*nkpts; ++ik)
     {
-      char twistname[16];
+      char twistname[32];
       sprintf(twistname,"kpoint_%i",ik );
       hid_t h1 = H5Gcreate(h_ptcls,twistname,0);
       for(int ispin=0; ispin<num_spins; ispin++)
       {
-        char spinname[16];
+        char spinname[32];
         sprintf(spinname,"spin_%i",ispin);
         hid_t h2 = H5Gcreate(h1,spinname,0);
         ret=H5LTmake_dataset(h2,"number_of_states",1,&dim1,H5T_NATIVE_INT,nband);
         for(int ib=0; ib<*nband; ib++) 
         {
-          char bandname[16];
+          char bandname[32];
           sprintf(bandname,"state_%i",ib);
           hid_t h3 = H5Gcreate(h2,bandname,0);
           H5Gclose(h3);
@@ -348,7 +349,7 @@ void F77_FUNC_(esh5_open_spin,ESH5_OPEN_SPIN)(const int* ispin)
     h_spin=H5Gcreate(h_kpoint,sname,0);
     for(int ib=0; ib<num_bands; ib++) 
     {
-      char bandname[16];
+      char bandname[32];
       sprintf(bandname,"state_%i",ib);
       hid_t h3 = H5Gcreate(h_spin,bandname,0);
       H5Gclose(h3);
@@ -859,8 +860,7 @@ void F77_FUNC_(esh5_join_all,ESH5_JOIN_ALL)(const char* fname, const int* length
   h_ptcls = H5Gopen(h_file,"electrons");
   if (h_ptcls<0)
   {
-    printf("Something is wrong");
-    printf( hfname );
+    printf("Something is wrong %s\n", hfname);
     return;
   }
   
@@ -890,7 +890,7 @@ void F77_FUNC_(esh5_join_all,ESH5_JOIN_ALL)(const char* fname, const int* length
       //     create kpoint/spin/state groups
       for(int ik=0; ik<num_kpoints; ++ik)
       {
-	char twistname[16];
+	char twistname[32];
 	sprintf(twistname,"kpoint_%i",ik);
 	
 	if (H5Lexists( h_ptcls2, twistname, H5P_DEFAULT )<=0)
@@ -901,7 +901,7 @@ void F77_FUNC_(esh5_join_all,ESH5_JOIN_ALL)(const char* fname, const int* length
 	h_kpoint = H5Gopen(h_ptcls,twistname);
 	for(int ispin=0; ispin<num_spins; ispin++)
 	{
-	  char spinname[16];
+	  char spinname[32];
 	  sprintf(spinname,"spin_%i",ispin);
 	  if (H5Lexists( h1, spinname, H5P_DEFAULT )<=0)
 	  {
@@ -919,7 +919,7 @@ void F77_FUNC_(esh5_join_all,ESH5_JOIN_ALL)(const char* fname, const int* length
 // 	  ret=H5LTmake_dataset(h2,"number_of_states",1,&dim1,H5T_NATIVE_INT,num_bands);
 	  for(int ib=0; ib<num_bands; ib++) 
 	  {
-	    char bandname[16];
+	    char bandname[32];
 	    sprintf(bandname,"state_%i",ib);
 	    if (H5Lexists( h2, bandname, H5P_DEFAULT )<=0)
 	    {

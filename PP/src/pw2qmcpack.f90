@@ -12,7 +12,7 @@ PROGRAM pw2qmcpack
   ! This subroutine writes the file "prefix".pwscf.xml and "prefix".pwscf.h5
   ! containing the  plane wave coefficients and other stuff needed by QMCPACK. 
 
-  USE io_files,  ONLY : nd_nmbr, prefix, outdir, tmp_dir
+  USE io_files,  ONLY : nd_nmbr, prefix, tmp_dir
   USE io_global, ONLY : stdout, ionode, ionode_id
   USE mp,        ONLY : mp_bcast
   USE mp_global,  ONLY : mp_startup, npool, nimage, nproc_pool, nproc_file, nproc_pool_file
@@ -25,11 +25,13 @@ PROGRAM pw2qmcpack
   INTEGER :: ios
   LOGICAL :: write_psir, expand_kp, debug
   REAL(DP) :: t1, t2, dt
+  ! directory for temporary files
+  CHARACTER(len=256) :: outdir
   !
   CHARACTER(LEN=256), EXTERNAL :: trimcheck
 
   NAMELIST / inputpp / prefix, outdir, write_psir, expand_kp, debug
-#ifdef __PARA
+#ifdef __MPI
   CALL mp_startup ( )
 #endif
 
@@ -68,9 +70,8 @@ PROGRAM pw2qmcpack
   CALL mp_bcast(expand_kp, ionode_id, world_comm ) 
   CALL mp_bcast(debug, ionode_id, world_comm ) 
   !
-  ! NAR Previously a call to read_file below, read_file_lite is much faster!
   CALL start_clock ( 'read_file_lite' )
-  CALL read_file_lite
+  CALL read_file
   CALL stop_clock ( 'read_file_lite' )
   IF ( ( nproc /= nproc_file .or. nproc_pool /= nproc_pool_file) .and. .not. twfcollect)  &
     CALL errore('pw2qmcpack', 'pw.x run with different numbers of procs and pools. &
@@ -128,7 +129,9 @@ SUBROUTINE compute_qmcpack(write_psir, expand_kp, debug)
   USE klist , ONLY: nks, nelec, nelup, neldw, wk, xk, nkstot
   USE lsda_mod, ONLY: lsda, nspin, isk
   USE scf, ONLY: rho, rho_core, rhog_core, vnew
-  USE wvfct, ONLY: npw, npwx, nbnd, igk, g2kin, wg, et, ecutwfc
+  USE wvfct, ONLY: npw, npwx, nbnd, g2kin, wg, et
+  USE klist, ONLY: igk_k
+  USE gvecw, ONLY : ecutwfc
   USE control_flags, ONLY: gamma_only
   USE becmod, ONLY: becp, calbec, allocate_bec_type, deallocate_bec_type
   USE io_global, ONLY: stdout, ionode,  ionode_id
@@ -316,11 +319,11 @@ SUBROUTINE compute_qmcpack(write_psir, expand_kp, debug)
 
   DO ik = 1, nks
      basekindex = ik + nbase
-     CALL gk_sort (xk (1, basekindex), ngm, g, ecutwfc / tpiba2, npw, igk, g2kin)
+     CALL gk_sort (xk (1, basekindex), ngm, g, ecutwfc / tpiba2, npw, igk_k(:,ik), g2kin)
 
      DO ig =1, npw
         ! mapping to the global g vectors.
-        igk_g = ig_l2g(igk(ig))
+        igk_g = ig_l2g(igk_k(ig,ik))
         IF( igk_g > 4*npwx_tot ) & 
              CALL errore ('pw2qmcpack','increase allocation of index', ig)
         indx( igk_g ) = 1
@@ -870,7 +873,7 @@ SUBROUTINE compute_qmcpack(write_psir, expand_kp, debug)
     if(pool_ionode) CALL esh5_open_spin(ispin)
     DO ibnd = 1, nbnd
       eigpacked(:)=(0.d0,0.d0)
-      eigpacked(igtomin(ig_l2g(igk(1:npw))))=evc(1:npw,ibnd)
+      eigpacked(igtomin(ig_l2g(igk_k(1:npw,ik))))=evc(1:npw,ibnd)
       if(debug) write(6,"(A,1I5)") "     collecting band ", ibnd
       CALL mp_sum ( eigpacked , intra_pool_comm )
       if(debug) write(6,"(A,1I5)") "        writing band ", ibnd
@@ -910,7 +913,7 @@ SUBROUTINE compute_qmcpack(write_psir, expand_kp, debug)
         !!! MAM: This could be outside the num_irrep group is ispin = 1,
         !!!      can I switch the order of esh5_open_spin and
         !!!      esh5_open_kpoint??? 
-        CALL gk_sort (xk (1:3, ik), ngm, g, ecutwfc / tpiba2, npw, igk, g2kin)
+        CALL gk_sort (xk (1:3, ik), ngm, g, ecutwfc / tpiba2, npw, igk_k(:,ik), g2kin)
         CALL davcio (evc, 2*nwordwfc, iunwfc, ik, - 1)
         CALL gk_sort (xk_full_list (1:3, jks), ngm, g, ecutwfc / tpiba2, npw_sym, igk_sym, g2kin_sym)
         if(npw .ne. npw_sym )  then
@@ -929,7 +932,7 @@ SUBROUTINE compute_qmcpack(write_psir, expand_kp, debug)
              tmp_evc(:) = (0.d0,0.d0) 
              IF(nproc_pool > 1) THEN
                ! 
-               psic(nls(ig_l2g(igk(1:npw))))=evc(1:npw,ibnd)
+               psic(nls(ig_l2g(igk_k(1:npw,ik))))=evc(1:npw,ibnd)
                
 !                call errore ('pw2qmcpack','parallel version not fully implemented.',2)
                if(gamma_only) then
@@ -953,7 +956,7 @@ SUBROUTINE compute_qmcpack(write_psir, expand_kp, debug)
                ! 
              ELSE ! nproc_pool <= 1
                ! 
-               psic(nls(ig_l2g(igk(1:npw))))=evc(1:npw,ibnd)
+               psic(nls(ig_l2g(igk_k(1:npw,ik))))=evc(1:npw,ibnd)
                if(gamma_only) then
                       call errore ('pw2qmcpack','problems with gamma_only, not fully implemented.',2)
                endif
@@ -997,7 +1000,7 @@ SUBROUTINE compute_qmcpack(write_psir, expand_kp, debug)
              !
              !tmp_evc(:) = evc(:,ibnd)
              eigpacked(:)=(0.d0,0.d0)
-             eigpacked(igtomin(ig_l2g(igk(1:npw))))=evc(1:npw,ibnd)
+             eigpacked(igtomin(ig_l2g(igk_k(1:npw,ik))))=evc(1:npw,ibnd)
              !
            ENDIF ! expandkp
 
@@ -1130,7 +1133,7 @@ CALL stop_clock( 'big_loop' )
   !
   USE klist,      ONLY : nkstot
   USE io_global,            ONLY : stdout
-  USE wvfct,                ONLY : nbnd, npwx, npw, igk, wg, et
+  USE wvfct,                ONLY : nbnd, npwx, npw, wg, et
   USE klist,                ONLY : wk, ngk, nks
   USE symm_base,            ONLY : nsym, s, ftau
   USE lsda_mod,             ONLY: lsda
