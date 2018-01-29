@@ -14,7 +14,7 @@
  * 
  */
 
-#if defined(__HDF5)
+#if defined(__HDF5) || defined(__HDF5_C)
 
 #include <stdio.h> 
 #include <string.h>

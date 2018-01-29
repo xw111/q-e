@@ -36,7 +36,7 @@ PROGRAM pw2qmcpack
 #endif
 
   CALL environment_start ( 'pw2qmcpack' )
-#if defined(__HDF5)
+#if defined(__HDF5) || defined(__HDF5_C)
   IF ( nimage > 1) &
      CALL errore('pw2qmcpack', ' image parallelization not (yet) implemented', 1)
 
@@ -377,7 +377,7 @@ SUBROUTINE compute_qmcpack(write_psir, expand_kp, debug)
   tmp = TRIM( tmp_dir )//TRIM( h5name ) 
   h5len = LEN_TRIM(tmp)
   
-#if defined(__HDF5)
+#if defined(__HDF5) || defined(__HDF5_C)
   ! writing to xml and hdf5
   ! open hdf5 file 
   oldh5=0
@@ -1071,7 +1071,7 @@ CALL stop_clock( 'big_loop' )
   ! ignore spin for the time being
   !CALL esh5_write_rho(rho,rhog(1,1),ngm)
 
-#if defined(__HDF5)
+#if defined(__HDF5) || defined(__HDF5_C)
   CALL start_clock( 'write_h5' )
   if(ionode) then
     CALL esh5_open_density(gint_den,ngm_g,nr1s,nr2s,nr3s)
